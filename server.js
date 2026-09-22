@@ -12,8 +12,9 @@ const COOKIE = "hm_session";
 const IS_PROD = process.env.NODE_ENV === "production";
 
 const catalog = vm.runInNewContext(
-  fs.readFileSync(path.join(ROOT, "js", "data.js"), "utf8") + "\n({ PRODUCTS, copay, productById, productGroup, isWelfare })"
+  fs.readFileSync(path.join(ROOT, "js", "data.js"), "utf8") + "\n({ PRODUCTS, GROUPS, CATEGORIES, copay, productById, productGroup, isWelfare })"
 );
+const SITE = (process.env.SITE_URL || "https://hyundaimedi.com").replace(/\/$/, "");
 
 store.ensure();
 
@@ -23,7 +24,7 @@ app.use(express.json({ limit: "200kb" }));
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "account", "checkout"
+  "login", "signup", "account", "checkout", "sitemap"
 ];
 
 app.use("/css", express.static(path.join(ROOT, "css")));
@@ -36,6 +37,54 @@ pages.forEach((name) => {
   app.get("/" + name, send);
 });
 app.get("/", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
+
+function xmlUrl(loc, changefreq, priority) {
+  return [
+    "  <url>",
+    "    <loc>" + loc + "</loc>",
+    "    <changefreq>" + changefreq + "</changefreq>",
+    "    <priority>" + priority + "</priority>",
+    "  </url>"
+  ].join("\n");
+}
+
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain").send(
+    "User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /account\nDisallow: /checkout\nSitemap: " + SITE + "/sitemap.xml\n"
+  );
+});
+
+app.get("/sitemap.xml", (_req, res) => {
+  const urls = [
+    xmlUrl(SITE + "/", "weekly", "1.0"),
+    xmlUrl(SITE + "/shop.html", "weekly", "0.9"),
+    xmlUrl(SITE + "/guide.html", "monthly", "0.8"),
+    xmlUrl(SITE + "/consult.html", "monthly", "0.8"),
+    xmlUrl(SITE + "/about.html", "monthly", "0.7"),
+    xmlUrl(SITE + "/sitemap.html", "monthly", "0.4"),
+    xmlUrl(SITE + "/login.html", "yearly", "0.3"),
+    xmlUrl(SITE + "/signup.html", "yearly", "0.3")
+  ];
+  (catalog.GROUPS || []).forEach((g) => {
+    urls.push(xmlUrl(SITE + "/shop.html?group=" + encodeURIComponent(g.id), "weekly", "0.8"));
+  });
+  (catalog.CATEGORIES || []).forEach((c) => {
+    urls.push(xmlUrl(
+      SITE + "/shop.html?group=" + encodeURIComponent(c.group) + "&category=" + encodeURIComponent(c.id),
+      "weekly",
+      "0.6"
+    ));
+  });
+  (catalog.PRODUCTS || []).forEach((p) => {
+    urls.push(xmlUrl(SITE + "/product.html?id=" + encodeURIComponent(p.id), "monthly", "0.5"));
+  });
+  res.type("application/xml").send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    urls.join("\n") +
+    "\n</urlset>\n"
+  );
+});
 
 function normalizePhone(raw) {
   return String(raw || "").replace(/\D/g, "");

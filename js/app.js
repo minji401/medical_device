@@ -130,6 +130,7 @@ function footerHTML() {
         <p><a href="guide.html">급여·비급여 이용안내</a></p>
         <p><a href="shop.html">복지용구 · 비급여 · 장애인 용품</a></p>
         <p><a href="login.html">로그인 · 주문조회</a></p>
+        <p><a href="sitemap.html">사이트맵</a></p>
         <p><a href="consult.html">방문설치 상담</a></p>
       </div>
       <div>
@@ -811,4 +812,38 @@ function initAbout() {
   mountShell("about");
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initLogin, initSignup, initAccount, initCheckout };
+function initSitemap() {
+  mountShell("about");
+  const root = document.querySelector("#sitemap-root");
+  if (!root) return;
+  const pages = [
+    ["index.html", "홈"],
+    ["shop.html", "전체 상품"],
+    ["guide.html", "급여·비급여 이용안내"],
+    ["consult.html", "상담 신청"],
+    ["about.html", "사업소 소개"],
+    ["login.html", "로그인"],
+    ["signup.html", "회원가입"],
+    ["account.html", "마이페이지 · 주문조회"]
+  ];
+  const pageList = pages.map(([href, label]) => `<li><a href="${href}">${esc(label)}</a></li>`).join("");
+  const groupCols = GROUPS.map((g) => {
+    const cats = CATEGORIES.filter((c) => c.group === g.id);
+    const items = cats.map((c) =>
+      `<li><a href="${shopQuery({ group: g.id, category: c.id })}">${esc(c.name)}</a></li>`
+    ).join("");
+    return `<article class="panel sitemap-col">
+      <h2><a href="${esc(g.href)}">${esc(g.name)}</a></h2>
+      <p class="muted">${esc(g.blurb)}</p>
+      <ul class="sitemap-list">${items}</ul>
+    </article>`;
+  }).join("");
+  root.innerHTML = `
+    <article class="panel sitemap-col">
+      <h2>바로가기</h2>
+      <ul class="sitemap-list">${pageList}</ul>
+    </article>
+    ${groupCols}`;
+}
+
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initAccount, initCheckout };
