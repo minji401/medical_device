@@ -198,7 +198,7 @@ ul { list-style: none; }
   margin: 16px auto 0;
   border-radius: 28px;
   background:
-    linear-gradient(90deg, rgba(255,255,255,.92) 0%, rgba(255,255,255,.7) 32%, rgba(255,255,255,.28) 46%, rgba(255,255,255,.06) 52%, transparent 58%),
+    linear-gradient(90deg, rgba(255,255,255,.92) 0%, rgba(255,255,255,.72) 42%, rgba(255,255,255,.38) 58%, rgba(255,255,255,.12) 68%, transparent 74%),
     url("https://images.unsplash.com/photo-1581579438747-1dc8d17bbce4?auto=format&fit=crop&w=1800&q=80") 58% 18% / cover;
   color: var(--ink);
   min-height: 560px;
@@ -822,7 +822,7 @@ ul { list-style: none; }
     min-height: 520px;
     width: calc(100% - 24px);
     background:
-      linear-gradient(180deg, rgba(255,255,255,.82) 0%, rgba(255,255,255,.4) 42%, rgba(255,255,255,.08) 52%, transparent 62%),
+      linear-gradient(180deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.5) 52%, rgba(255,255,255,.14) 68%, transparent 76%),
       url("https://images.unsplash.com/photo-1581579438747-1dc8d17bbce4?auto=format&fit=crop&w=1400&q=80") 48% 12% / cover;
   }
   .hero-inner { padding: 40px 20px 28px; }
