@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>급여·본인부담 안내 | 현대 의료기</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="site-header"></div>
+  <section class="page-hero">
+    <div class="wrap">
+      <div class="crumbs">홈 · 급여안내</div>
+      <h1>복지용구 · 비급여 · 장애인 용품,<br>이렇게 이용합니다</h1>
+      <p>장기요양 급여 품목과 일반 구매 품목, 장애인 보조기기를 나눠 안내합니다.</p>
+    </div>
+  </section>
+  <section class="section">
+    <div class="wrap guide-grid">
+      <article class="panel">
+        <span class="tag">구입 품목</span>
+        <h2 style="margin:10px 0 14px">집에서 바로 쓰는 용품</h2>
+        <ul class="spec">
+          <li><span>이동·보행</span><b>지팡이, 성인용보행기</b></li>
+          <li><span>욕실·안전</span><b>목욕의자, 안전손잡이, 미끄럼방지</b></li>
+          <li><span>위생</span><b>이동변기, 간이변기, 요실금팬티</b></li>
+          <li><span>침상</span><b>자세변환용구, 욕창예방방석</b></li>
+        </ul>
+      </article>
+      <article class="panel">
+        <span class="tag">대여 품목</span>
+        <h2 style="margin:10px 0 14px">설치·회수가 필요한 용품</h2>
+        <ul class="spec">
+          <li><span>침상</span><b>전동침대, 수동침대</b></li>
+          <li><span>이동</span><b>수동휠체어</b></li>
+          <li><span>목욕</span><b>이동욕조, 목욕리프트</b></li>
+          <li><span>안전</span><b>배회감지기</b></li>
+          <li><span>구입 또는 대여</span><b>욕창예방매트리스, 경사로</b></li>
+        </ul>
+      </article>
+    </div>
+  </section>
+  <section class="section" style="padding-top:0">
+    <div class="wrap guide-grid">
+      <article class="panel calc">
+        <span class="tag">계산기</span>
+        <h2 style="margin:10px 0">본인부담금 미리 보기</h2>
+        <label for="price">상품 가격 또는 월 대여가</label>
+        <input id="price" type="number" value="79400" />
+        <label for="rate">본인부담률</label>
+        <select id="rate">
+          <option value="0.15">일반 15%</option>
+          <option value="0.09">감경 9%</option>
+          <option value="0.06">감경 6%</option>
+          <option value="0">기초생활수급 0%</option>
+        </select>
+        <div class="calc-result" id="calc-out"></div>
+      </article>
+      <article class="panel" id="quiz-box">
+        <span class="tag">3분 체크</span>
+        <h2 style="margin:10px 0">요양등급 상담이 필요할까요?</h2>
+        <p style="color:var(--muted);margin-bottom:12px">공단 인정조사를 대신하지 않습니다. 상담 방향을 잡는 참고용입니다.</p>
+        <div id="quiz"></div>
+      </article>
+    </div>
+  </section>
+  <section class="section" style="padding-top:0">
+    <div class="wrap guide-grid">
+      <article class="panel">
+        <span class="tag">비급여</span>
+        <h2 style="margin:10px 0 14px">일반의료기 · 노인생활용품</h2>
+        <p style="color:var(--muted);margin-bottom:12px">장기요양 등급·한도와 관계없이 구매합니다. 약 500개 품목을 건강측정, 호흡·산소, 물리치료·온열, 보호대, 생활용품으로 나눠 두었습니다.</p>
+        <ul class="spec">
+          <li><span>건강측정</span><b>혈압계, 혈당, 체온, 산소포화도</b></li>
+          <li><span>호흡·치료</span><b>산소발생기, 네블라이저, 석션기</b></li>
+          <li><span>온열·재활</span><b>저주파, 온열매트, 공기압, 보호대</b></li>
+          <li><span>생활용품</span><b>실버카, 식사보조, 낙상예방</b></li>
+        </ul>
+        <a class="btn btn-teal" href="shop.html#group=uninsured" style="margin-top:16px">비급여 상품 보기</a>
+      </article>
+      <article class="panel">
+        <span class="tag">장애인 용품</span>
+        <h2 style="margin:10px 0 14px">보조기기 · 보장구</h2>
+        <p style="color:var(--muted);margin-bottom:12px">등록 장애인이 공단 등록 업소에서 구입하면 일부 품목은 보조기기 급여를 받을 수 있습니다. 대상·기준액은 상담에서 확인합니다.</p>
+        <ul class="spec">
+          <li><span>이동</span><b>전동휠체어, 의료용스쿠터, 수동휠체어</b></li>
+          <li><span>청각</span><b>보청기</b></li>
+          <li><span>자세·이승</span><b>자세보조용구, 이동식 전동리프트</b></li>
+          <li><span>보행·맞춤</span><b>전·후방워커, 의지·보조기</b></li>
+        </ul>
+        <a class="btn btn-teal" href="shop.html#group=disability" style="margin-top:16px">장애인 용품 보기</a>
+      </article>
+    </div>
+  </section>
+  <section class="section" style="padding-top:0">
+    <div class="wrap panel">
+      <h2>꼭 알아 두실 점</h2>
+      <ul class="spec">
+        <li><span>시설 입소</span><b>요양원 입소 중에는 복지용구 이용이 제한됩니다.</b></li>
+        <li><span>입원</span><b>의료기관 15일 이상 입원 시 일부 대여 품목이 중단됩니다.</b></li>
+        <li><span>한도</span><b>구입·대여를 합산해 연 160만 원입니다.</b></li>
+        <li><span>계약</span><b>수급자 본인 또는 보호자가 사업소와 계약합니다.</b></li>
+      </ul>
+    </div>
+  </section>
+  <div id="site-footer"></div>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>Oncare.initGuide();</script>
+</body>
+</html>
