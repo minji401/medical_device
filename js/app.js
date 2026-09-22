@@ -78,6 +78,7 @@ function headerHTML(page) {
     ["shop.html#group=disability", "장애인 용품", "disability"],
     ["guide.html", "이용안내", "guide"],
     ["consult.html", "상담신청", "consult"],
+    ["account.html", "마이페이지", "account"],
     ["about.html", "사업소 소개", "about"]
   ];
   return `
@@ -105,7 +106,7 @@ function headerHTML(page) {
           <span>📞</span>
           <span><small>전문상담</small><b>054-334-9986</b></span>
         </a>
-        <a class="icon-btn text-link" href="consult.html" title="상담">👤</a>
+        <a class="auth-chip" id="auth-link" href="login.html" title="로그인">로그인</a>
         <button class="icon-btn" data-open-cart aria-label="장바구니">🛒<span class="cart-count" data-cart-count>0</span></button>
       </div>
     </div>
@@ -128,6 +129,7 @@ function footerHTML() {
         <h4>이용안내</h4>
         <p><a href="guide.html">급여·비급여 이용안내</a></p>
         <p><a href="shop.html">복지용구 · 비급여 · 장애인 용품</a></p>
+        <p><a href="login.html">로그인 · 주문조회</a></p>
         <p><a href="consult.html">방문설치 상담</a></p>
       </div>
       <div>
@@ -154,7 +156,7 @@ function footerHTML() {
     <a href="index.html">🏠<br>홈</a>
     <a href="shop.html">🛍️<br>상품군</a>
     <a href="guide.html">📋<br>급여안내</a>
-    <a href="consult.html">💬<br>상담</a>
+    <a href="account.html">👤<br>마이</a>
     <a href="#" data-open-cart>🛒<br>장바구니</a>
   </nav>
   <div class="cart-drawer" id="cart-drawer">
@@ -165,9 +167,70 @@ function footerHTML() {
       </div>
       <div id="cart-list"></div>
       <div class="cart-total" id="cart-total"></div>
-      <a class="btn btn-teal btn-lg" style="width:100%" href="consult.html">상담 후 주문하기</a>
+      <a class="btn btn-teal btn-lg" style="width:100%" href="checkout.html">주문 접수하기</a>
     </aside>
   </div>`;
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({
+    credentials: "include",
+    headers: { "Content-Type": "application/json" }
+  }, opts || {}));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "요청에 실패했습니다.");
+  return data;
+}
+
+async function apiMe() {
+  try {
+    const data = await api("/api/me");
+    return data.user || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function loginNext() {
+  const raw = getParam("next") || "account.html";
+  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(raw)) return "account.html";
+  return raw;
+}
+
+function showFormError(id, msg) {
+  const el = document.querySelector(id);
+  if (!el) return toast(msg);
+  el.hidden = !msg;
+  el.textContent = msg || "";
+}
+
+function statusLabel(status) {
+  return { received: "접수", reviewing: "확인 중", confirmed: "안내 완료", cancelled: "취소" }[status] || status;
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function refreshAuth() {
+  return apiMe().then((user) => {
+    window.currentUser = user;
+    const link = document.querySelector("#auth-link");
+    if (link) {
+      if (user) {
+        link.href = "account.html";
+        link.title = "마이페이지";
+        link.textContent = user.name + "님";
+      } else {
+        link.href = "login.html";
+        link.title = "로그인";
+        link.textContent = "로그인";
+      }
+    }
+    return user;
+  });
 }
 
 function getParam(key) {
@@ -268,6 +331,7 @@ function mountShell(page) {
   if (footer) footer.innerHTML = footerHTML();
   updateCartCount();
   renderCart();
+  refreshAuth();
   if (window.__shellBound) return;
   window.__shellBound = true;
 
@@ -535,19 +599,216 @@ function initConsult() {
       if (item.includes(el.value)) el.checked = true;
     });
   }
-  const form = document.querySelector("#consult-form");
-  if (form) {
-    form.onsubmit = (e) => {
+  refreshAuth().then((user) => {
+    const form = document.querySelector("#consult-form");
+    if (!form) return;
+    if (user) {
+      if (form.name && !form.name.value) form.name.value = user.name;
+      if (form.phone && !form.phone.value) form.phone.value = user.phone;
+    }
+    form.onsubmit = async (e) => {
       e.preventDefault();
       if (!form.agree.checked) return toast("개인정보 수집에 동의해 주세요.");
-      toast("상담 신청이 접수되었습니다. (데모)");
-      form.reset();
+        const topics = [...form.querySelectorAll(".checks input:checked")].map((el) => el.value);
+      try {
+        await api("/api/orders", {
+          method: "POST",
+          body: JSON.stringify({
+            type: "consult",
+            name: form.name.value,
+            phone: form.phone.value,
+            memo: form.message.value,
+            topics,
+            items: []
+          })
+        });
+        toast("상담 신청이 접수되었습니다.");
+        form.reset();
+      } catch (err) {
+        toast(err.message);
+      }
     };
-  }
+  });
+}
+
+function initLogin() {
+  mountShell("account");
+  refreshAuth().then((user) => {
+    if (user) location.href = loginNext();
+  });
+  const form = document.querySelector("#login-form");
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    showFormError("#login-error", "");
+    try {
+      await api("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ phone: form.phone.value, password: form.password.value })
+      });
+      location.href = loginNext();
+    } catch (err) {
+      showFormError("#login-error", err.message);
+    }
+  };
+}
+
+function initSignup() {
+  mountShell("account");
+  refreshAuth().then((user) => {
+    if (user) location.href = loginNext();
+  });
+  const form = document.querySelector("#signup-form");
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    showFormError("#signup-error", "");
+    try {
+      await api("/api/signup", {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.name.value,
+          phone: form.phone.value,
+          password: form.password.value
+        })
+      });
+      location.href = loginNext();
+    } catch (err) {
+      showFormError("#signup-error", err.message);
+    }
+  };
+}
+
+function initAccount() {
+  mountShell("account");
+  refreshAuth().then(async (user) => {
+    if (!user) {
+      location.href = "login.html#next=account.html";
+      return;
+    }
+    document.querySelector("#account-name").textContent = user.name + "님";
+    document.querySelector("#account-phone").textContent = user.phone + (user.role === "admin" ? " · 관리자" : "");
+    document.querySelector("#logout-btn").onclick = async () => {
+      await api("/api/logout", { method: "POST", body: "{}" });
+      location.href = "index.html";
+    };
+    try {
+      const data = await api("/api/orders");
+      const box = document.querySelector("#order-list");
+      if (!data.orders.length) {
+        box.innerHTML = `<p class="empty">아직 접수된 주문이 없습니다.</p>`;
+        return;
+      }
+      box.innerHTML = data.orders.map((o) => {
+        const items = (o.items || []).map((i) => `${esc(i.name)} × ${i.qty}`).join("<br>");
+        const topics = (o.topics || []).map(esc).join(", ");
+        const admin = user.role === "admin"
+          ? `<div class="order-admin">
+              <label>상태
+                <select data-order-status="${esc(o.id)}">
+                  ${["received", "reviewing", "confirmed", "cancelled"].map((s) =>
+                    `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
+                  ).join("")}
+                </select>
+              </label>
+            </div>`
+          : "";
+        return `<article class="panel order-card">
+          <div class="order-top">
+            <div>
+              <b>${esc(o.number)}</b>
+              <span class="status-pill">${statusLabel(o.status)}</span>
+            </div>
+            <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
+          </div>
+          <p>${o.type === "consult" ? "상담 신청" : "상품 주문"} · ${esc(o.name)} · ${esc(o.phone)}</p>
+          ${o.address ? `<p>${esc(o.address)}</p>` : ""}
+          ${topics ? `<p>관심 품목: ${topics}</p>` : ""}
+          ${items ? `<p>${items}</p>` : ""}
+          ${o.total ? `<p><b>예상 합계 ${won(o.total)}</b> (결제 전 접수)</p>` : ""}
+          ${o.memo ? `<p class="muted">${esc(o.memo)}</p>` : ""}
+          ${admin}
+        </article>`;
+      }).join("");
+      box.onchange = async (e) => {
+        const sel = e.target.closest("[data-order-status]");
+        if (!sel) return;
+        try {
+          await api("/api/orders/" + sel.dataset.orderStatus, {
+            method: "PATCH",
+            body: JSON.stringify({ status: sel.value })
+          });
+          toast("상태를 바꿨습니다.");
+        } catch (err) {
+          toast(err.message);
+        }
+      };
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+}
+
+function initCheckout() {
+  mountShell("shop");
+  refreshAuth().then((user) => {
+    if (!user) {
+      location.href = "login.html#next=checkout.html";
+      return;
+    }
+    const form = document.querySelector("#checkout-form");
+    if (form) {
+      form.name.value = user.name;
+      form.phone.value = user.phone;
+    }
+    const items = cart();
+    const box = document.querySelector("#checkout-items");
+    const totalEl = document.querySelector("#checkout-total");
+    if (!items.length) {
+      box.innerHTML = `<p class="empty">장바구니가 비어 있습니다. <a href="shop.html">상품 보러 가기</a></p>`;
+      if (form) form.querySelector("button[type=submit]").disabled = true;
+      return;
+    }
+    let sum = 0;
+    box.innerHTML = items.map((i) => {
+      const p = productById(i.id);
+      if (!p) return "";
+      const unit = isWelfare(p) ? copay(p.price) : p.price;
+      const pay = unit * i.qty;
+      sum += pay;
+      return `<div class="cart-item">
+        <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
+        <div><b>${esc(p.name)}</b><div>${i.qty}개 · ${won(pay)}</div></div>
+      </div>`;
+    }).join("");
+    totalEl.textContent = "예상 합계 " + won(sum) + " · 결제 전 접수";
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      showFormError("#checkout-error", "");
+      try {
+        const result = await api("/api/orders", {
+          method: "POST",
+          body: JSON.stringify({
+            type: "order",
+            name: form.name.value,
+            phone: form.phone.value,
+            address: form.address.value,
+            memo: form.memo.value,
+            items
+          })
+        });
+        saveCart([]);
+        toast("주문이 접수되었습니다. " + result.order.number);
+        location.href = "account.html";
+      } catch (err) {
+        showFormError("#checkout-error", err.message);
+      }
+    };
+  });
 }
 
 function initAbout() {
   mountShell("about");
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout };
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initLogin, initSignup, initAccount, initCheckout };

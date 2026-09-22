@@ -721,7 +721,57 @@ ul { list-style: none; }
 }
 .quiz button:hover, .quiz button.picked { border-color: var(--teal); background: var(--teal-soft); }
 
-.empty { text-align: center; padding: 48px 16px; color: var(--muted); }
+.auth-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  color: var(--teal-dark);
+  white-space: nowrap;
+}
+.auth-chip:hover { background: var(--teal-soft); }
+.auth-wrap { max-width: 460px; }
+.auth-switch { margin-top: 16px; text-align: center; color: var(--muted); }
+.auth-switch a { color: var(--teal-dark); font-weight: 700; }
+.form-error {
+  margin-top: 12px;
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 14px;
+}
+.muted { color: var(--muted); }
+.account-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.order-card { margin-bottom: 16px; }
+.order-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.status-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 800;
+}
+.order-admin { margin-top: 12px; }
+.order-admin select {
+  margin-left: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
 
 @media (max-width: 1100px) {
   .header-actions .text-link { display: none; }
