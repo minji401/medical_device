@@ -38,10 +38,14 @@ pages.forEach((name) => {
 });
 app.get("/", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
 
+function xmlEscape(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function xmlUrl(loc, changefreq, priority) {
   return [
     "  <url>",
-    "    <loc>" + loc + "</loc>",
+    "    <loc>" + xmlEscape(loc) + "</loc>",
     "    <changefreq>" + changefreq + "</changefreq>",
     "    <priority>" + priority + "</priority>",
     "  </url>"
