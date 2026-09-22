@@ -3,7 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const vm = require("vm");
 const express = require("express");
-const store = require("./server/store");
+const db = require("./server/db");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
@@ -16,7 +16,6 @@ const catalog = vm.runInNewContext(
 );
 const SITE = (process.env.SITE_URL || "https://hyundaimedi.com").replace(/\/$/, "");
 
-store.ensure();
 
 const app = express();
 app.disable("x-powered-by");
@@ -167,14 +166,14 @@ function publicUser(user) {
   return { id: user.id, name: user.name, phone: user.phone, role: user.role || "user" };
 }
 
-function currentUser(req) {
+async function currentUser(req) {
   const payload = unsign(parseCookies(req)[COOKIE]);
   if (!payload) return null;
-  return store.users().find((u) => u.id === payload.uid) || null;
+  return db.findUserById(payload.uid);
 }
 
-function requireUser(req, res, next) {
-  const user = currentUser(req);
+async function requireUser(req, res, next) {
+  const user = await currentUser(req);
   if (!user) return res.status(401).json({ error: "로그인이 필요합니다." });
   req.user = user;
   next();
@@ -193,19 +192,18 @@ function tooMany(ip) {
   return row.n > 12;
 }
 
-app.get("/api/me", (req, res) => {
-  res.json({ user: publicUser(currentUser(req)) });
+app.get("/api/me", async (req, res) => {
+  res.json({ user: publicUser(await currentUser(req)) });
 });
 
-app.post("/api/signup", (req, res) => {
+app.post("/api/signup", async (req, res) => {
   const name = String(req.body.name || "").trim();
   const phone = normalizePhone(req.body.phone);
   const password = String(req.body.password || "");
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
   if (password.length < 8) return res.status(400).json({ error: "비밀번호는 8자 이상이어야 합니다." });
-  const list = store.users();
-  if (list.some((u) => u.phone === phone)) {
+  if (await db.findUserByPhone(phone)) {
     return res.status(409).json({ error: "이미 가입된 휴대폰 번호입니다." });
   }
   const user = {
@@ -214,20 +212,22 @@ app.post("/api/signup", (req, res) => {
     phone,
     passwordHash: hashPassword(password),
     role: process.env.ADMIN_PHONE && normalizePhone(process.env.ADMIN_PHONE) === phone ? "admin" : "user",
+    heriumLinked: false,
+    heriumRelation: "",
+    heriumNote: "",
     createdAt: new Date().toISOString()
   };
-  list.push(user);
-  store.saveUsers(list);
+  await db.createUser(user);
   setSession(res, user.id);
   res.json({ user: publicUser(user) });
 });
 
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
   if (tooMany(ip)) return res.status(429).json({ error: "잠시 후 다시 시도해 주세요." });
   const phone = normalizePhone(req.body.phone);
   const password = String(req.body.password || "");
-  const user = store.users().find((u) => u.phone === phone);
+  const user = await db.findUserByPhone(phone);
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return res.status(401).json({ error: "휴대폰 번호 또는 비밀번호가 올바르지 않습니다." });
   }
@@ -267,8 +267,8 @@ function buildItems(rawItems) {
   return { items, total };
 }
 
-app.post("/api/orders", (req, res) => {
-  const user = currentUser(req);
+app.post("/api/orders", async (req, res) => {
+  const user = await currentUser(req);
   const type = req.body.type === "consult" ? "consult" : "order";
   const name = String(req.body.name || (user && user.name) || "").trim();
   const phone = normalizePhone(req.body.phone || (user && user.phone) || "");
@@ -299,15 +299,15 @@ app.post("/api/orders", (req, res) => {
     status: "received",
     createdAt: new Date().toISOString()
   };
-  const list = store.orders();
-  list.unshift(order);
-  store.saveOrders(list);
+  await db.createOrder(order);
   res.json({ order: { id: order.id, number: order.number, status: order.status } });
 });
 
-app.get("/api/orders", requireUser, (req, res) => {
-  const all = store.orders();
-  const list = req.user.role === "admin" ? all : all.filter((o) => o.userId === req.user.id);
+app.get("/api/orders", requireUser, async (req, res) => {
+  const list = await db.listOrders({
+    all: req.user.role === "admin",
+    userId: req.user.id
+  });
   res.json({
     orders: list.map((o) => ({
       id: o.id,
@@ -326,16 +326,13 @@ app.get("/api/orders", requireUser, (req, res) => {
   });
 });
 
-app.patch("/api/orders/:id", requireUser, (req, res) => {
+app.patch("/api/orders/:id", requireUser, async (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ error: "관리자만 변경할 수 있습니다." });
   const allowed = ["received", "reviewing", "confirmed", "cancelled"];
   const status = String(req.body.status || "");
   if (allowed.indexOf(status) < 0) return res.status(400).json({ error: "상태 값이 올바르지 않습니다." });
-  const list = store.orders();
-  const order = list.find((o) => o.id === req.params.id);
+  const order = await db.updateOrderStatus(req.params.id, status);
   if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
-  order.status = status;
-  store.saveOrders(list);
   res.json({ ok: true, status });
 });
 
@@ -344,6 +341,11 @@ app.use((req, res) => {
   res.status(404).sendFile(path.join(ROOT, "index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log("현대 의료기 서버 http://localhost:" + PORT);
+db.init().then(() => {
+  app.listen(PORT, () => {
+    console.log("현대 의료기 서버 http://localhost:" + PORT);
+  });
+}).catch((err) => {
+  console.error("DB 시작 실패:", err);
+  process.exit(1);
 });
