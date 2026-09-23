@@ -97,19 +97,29 @@ function validPhone(phone) {
   return /^01[016789]\d{7,8}$/.test(phone);
 }
 
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+
 function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-  return salt + ":" + hash;
+  const saltHex = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, saltHex, 64, SCRYPT);
+  return saltHex + ":" + hash.toString("hex");
 }
 
 function verifyPassword(password, stored) {
-  const parts = String(stored || "").split(":");
-  if (parts.length !== 2) return false;
-  const test = crypto.scryptSync(password, parts[0], 64);
-  const real = Buffer.from(parts[1], "hex");
-  if (test.length !== real.length) return false;
-  return crypto.timingSafeEqual(test, real);
+  const raw = String(stored || "");
+  const cut = raw.indexOf(":");
+  if (cut < 1) return false;
+  const saltHex = raw.slice(0, cut);
+  const hashHex = raw.slice(cut + 1);
+  if (!saltHex || !hashHex) return false;
+  try {
+    const actual = crypto.scryptSync(password, saltHex, 64, SCRYPT);
+    const expected = Buffer.from(hashHex, "hex");
+    if (actual.length !== expected.length) return false;
+    return crypto.timingSafeEqual(actual, expected);
+  } catch (_e) {
+    return false;
+  }
 }
 
 function sign(payload) {
