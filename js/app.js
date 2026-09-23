@@ -632,8 +632,30 @@ function initConsult() {
   });
 }
 
+function bindPasswordToggles(root) {
+  (root || document).querySelectorAll("[data-toggle-pw]").forEach((btn) => {
+    btn.onclick = () => {
+      const input = btn.parentElement.querySelector("input");
+      if (!input) return;
+      input.type = input.type === "password" ? "text" : "password";
+    };
+  });
+}
+
+function bindSocialLinks(root) {
+  const next = loginNext();
+  (root || document).querySelectorAll("[data-social]").forEach((el) => {
+    const provider = el.getAttribute("data-social");
+    el.href = "/api/auth/" + provider + "?next=" + encodeURIComponent(next);
+  });
+}
+
 function initLogin() {
   mountShell("account");
+  bindPasswordToggles();
+  bindSocialLinks();
+  const err = getParam("error");
+  if (err) showFormError("#login-error", err);
   refreshAuth().then((user) => {
     if (user) location.href = loginNext();
   });
@@ -645,7 +667,7 @@ function initLogin() {
     try {
       await api("/api/login", {
         method: "POST",
-        body: JSON.stringify({ phone: form.phone.value, password: form.password.value })
+        body: JSON.stringify({ login: form.login.value, password: form.password.value })
       });
       location.href = loginNext();
     } catch (err) {
@@ -656,6 +678,8 @@ function initLogin() {
 
 function initSignup() {
   mountShell("account");
+  bindPasswordToggles();
+  bindSocialLinks();
   refreshAuth().then((user) => {
     if (user) location.href = loginNext();
   });
@@ -668,6 +692,7 @@ function initSignup() {
       await api("/api/signup", {
         method: "POST",
         body: JSON.stringify({
+          username: form.username.value,
           name: form.name.value,
           phone: form.phone.value,
           password: form.password.value
@@ -680,6 +705,61 @@ function initSignup() {
   };
 }
 
+function initFindId() {
+  mountShell("account");
+  const form = document.querySelector("#find-id-form");
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    showFormError("#find-id-error", "");
+    const result = document.querySelector("#find-id-result");
+    if (result) {
+      result.hidden = true;
+      result.textContent = "";
+    }
+    try {
+      const data = await api("/api/find-id", {
+        method: "POST",
+        body: JSON.stringify({ name: form.name.value, phone: form.phone.value })
+      });
+      if (result) {
+        result.hidden = false;
+        result.textContent = data.username
+          ? "아이디는 " + data.username + " 입니다."
+          : "휴대폰 번호로 로그인할 수 있습니다.";
+      }
+    } catch (err) {
+      showFormError("#find-id-error", err.message);
+    }
+  };
+}
+
+function initFindPassword() {
+  mountShell("account");
+  bindPasswordToggles();
+  const form = document.querySelector("#reset-form");
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    showFormError("#reset-error", "");
+    try {
+      await api("/api/reset-password", {
+        method: "POST",
+        body: JSON.stringify({
+          login: form.login.value,
+          name: form.name.value,
+          phone: form.phone.value,
+          password: form.password.value
+        })
+      });
+      toast("비밀번호를 바꿨습니다. 다시 로그인해 주세요.");
+      location.href = "login.html";
+    } catch (err) {
+      showFormError("#reset-error", err.message);
+    }
+  };
+}
+
 function initAccount() {
   mountShell("account");
   refreshAuth().then(async (user) => {
@@ -688,7 +768,11 @@ function initAccount() {
       return;
     }
     document.querySelector("#account-name").textContent = user.name + "님";
-    document.querySelector("#account-phone").textContent = user.phone + (user.role === "admin" ? " · 관리자" : "");
+    const bits = [];
+    if (user.username) bits.push("아이디 " + user.username);
+    bits.push(user.phone || "휴대폰 미등록");
+    if (user.role === "admin") bits.push("관리자");
+    document.querySelector("#account-phone").textContent = bits.join(" · ");
     document.querySelector("#logout-btn").onclick = async () => {
       await api("/api/logout", { method: "POST", body: "{}" });
       location.href = "index.html";
@@ -760,7 +844,7 @@ function initCheckout() {
     const form = document.querySelector("#checkout-form");
     if (form) {
       form.name.value = user.name;
-      form.phone.value = user.phone;
+      form.phone.value = user.phone || "";
     }
     const items = cart();
     const box = document.querySelector("#checkout-items");
@@ -824,6 +908,8 @@ function initSitemap() {
     ["about.html", "사업소 소개"],
     ["login.html", "로그인"],
     ["signup.html", "회원가입"],
+    ["find-id.html", "아이디 찾기"],
+    ["find-password.html", "비밀번호 찾기"],
     ["account.html", "마이페이지 · 주문조회"]
   ];
   const pageList = pages.map(([href, label]) => `<li><a href="${href}">${esc(label)}</a></li>`).join("");
@@ -846,4 +932,4 @@ function initSitemap() {
     ${groupCols}`;
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initAccount, initCheckout };
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initAccount, initCheckout };

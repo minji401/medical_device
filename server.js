@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const vm = require("vm");
 const express = require("express");
 const db = require("./server/db");
+const oauth = require("./server/oauth");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
@@ -23,7 +24,7 @@ app.use(express.json({ limit: "200kb" }));
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "account", "checkout", "sitemap"
+  "login", "signup", "find-id", "find-password", "account", "checkout", "sitemap"
 ];
 
 app.use("/css", express.static(path.join(ROOT, "css")));
@@ -66,7 +67,11 @@ app.get("/sitemap.xml", (_req, res) => {
     xmlUrl(SITE + "/about.html", "monthly", "0.7"),
     xmlUrl(SITE + "/sitemap.html", "monthly", "0.4"),
     xmlUrl(SITE + "/login.html", "yearly", "0.3"),
-    xmlUrl(SITE + "/signup.html", "yearly", "0.3")
+    xmlUrl(SITE + "/signup.html", "yearly", "0.3"),
+    xmlUrl(SITE + "/find-id.html", "yearly", "0.2"),
+    xmlUrl(SITE + "/find-password.html", "yearly", "0.2"),
+    xmlUrl(SITE + "/find-id.html", "yearly", "0.2"),
+    xmlUrl(SITE + "/find-password.html", "yearly", "0.2")
   ];
   (catalog.GROUPS || []).forEach((g) => {
     urls.push(xmlUrl(SITE + "/shop.html?group=" + encodeURIComponent(g.id), "weekly", "0.8"));
@@ -103,6 +108,23 @@ function hashPassword(password) {
   const saltHex = crypto.randomBytes(16).toString("hex");
   const hash = crypto.scryptSync(password, saltHex, 64, SCRYPT);
   return saltHex + ":" + hash.toString("hex");
+}
+
+function verifyDjangoPassword(password, encoded) {
+  const parts = String(encoded || "").split("$");
+  if (parts.length !== 4 || parts[0] !== "pbkdf2_sha256") return false;
+  const iterations = Number(parts[1]);
+  const salt = parts[2];
+  let expected;
+  try {
+    expected = Buffer.from(parts[3], "base64");
+  } catch (_e) {
+    return false;
+  }
+  if (!iterations || !salt || !expected.length) return false;
+  const actual = crypto.pbkdf2Sync(String(password), salt, iterations, expected.length, "sha256");
+  if (actual.length !== expected.length) return false;
+  return crypto.timingSafeEqual(actual, expected);
 }
 
 function verifyPassword(password, stored) {
@@ -164,16 +186,100 @@ function setSession(res, userId) {
     "Max-Age=" + 14 * 24 * 60 * 60
   ];
   if (IS_PROD) bits.push("Secure");
-  res.setHeader("Set-Cookie", bits.join("; "));
+  res.append("Set-Cookie", bits.join("; "));
 }
 
 function clearSession(res) {
-  res.setHeader("Set-Cookie", COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  res.append("Set-Cookie", COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
 }
 
 function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, name: user.name, phone: user.phone, role: user.role || "user" };
+  const phone = validPhone(normalizePhone(user.phone)) ? user.phone : "";
+  return {
+    id: user.id,
+    name: user.name,
+    phone,
+    username: user.username || "",
+    email: user.email || "",
+    role: user.role || "user"
+  };
+}
+
+function validUsername(raw) {
+  return /^[a-zA-Z가-힣][a-zA-Z0-9가-힣_]{3,19}$/.test(String(raw || "").trim());
+}
+
+function safeNext(raw) {
+  const value = String(raw || "").trim();
+  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(value)) return "/account.html";
+  return "/" + value;
+}
+
+function setOauth(res, payload) {
+  const token = sign(Object.assign({ exp: Date.now() + 10 * 60 * 1000 }, payload));
+  const bits = ["hm_oauth=" + token, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=600"];
+  if (IS_PROD) bits.push("Secure");
+  res.append("Set-Cookie", bits.join("; "));
+}
+
+function clearOauth(res) {
+  res.append("Set-Cookie", "hm_oauth=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+}
+
+function normalizeSocialPhone(raw) {
+  let phone = String(raw || "").replace(/\D/g, "");
+  if (phone.startsWith("82") && phone.length >= 11) phone = "0" + phone.slice(2);
+  return validPhone(phone) ? phone : "";
+}
+
+function sameName(a, b) {
+  return String(a || "").replace(/\s/g, "") === String(b || "").replace(/\s/g, "");
+}
+
+async function upsertSocialUser(provider, profile) {
+  const existing = await db.findUserBySocial(provider, profile.id);
+  if (existing) return existing;
+  const phone = normalizeSocialPhone(profile.phone);
+  if (phone) {
+    const byPhone = await db.findUserByPhone(phone);
+    if (byPhone) {
+      await db.linkSocial(byPhone.id, provider, profile.id);
+      return byPhone;
+    }
+  }
+  if (profile.email) {
+    const byEmail = await db.findUserByEmail(profile.email);
+    if (byEmail) {
+      await db.linkSocial(byEmail.id, provider, profile.id);
+      return byEmail;
+    }
+  }
+  let username = String((profile.email && profile.email.split("@")[0]) || provider + String(profile.id).slice(-6))
+    .replace(/[^a-zA-Z0-9가-힣_]/g, "")
+    .slice(0, 20);
+  if (!validUsername(username) || await db.findUserByUsername(username)) {
+    username = (provider.slice(0, 2) + String(profile.id).replace(/\W/g, "")).slice(0, 20);
+  }
+  if (!validUsername(username)) username = "s" + crypto.randomBytes(4).toString("hex");
+  const user = {
+    id: "u_" + crypto.randomUUID(),
+    name: String(profile.name || "회원").slice(0, 40),
+    username,
+    email: profile.email || "",
+    phone: phone || ("s" + provider.charAt(0) + String(profile.id).replace(/\D/g, "").slice(-10).padStart(10, "0")),
+    passwordHash: hashPassword(crypto.randomBytes(24).toString("hex")),
+    role: "user",
+    heriumLinked: true,
+    heriumRelation: "",
+    heriumNote: "",
+    kakaoId: provider === "kakao" ? String(profile.id) : "",
+    naverId: provider === "naver" ? String(profile.id) : "",
+    googleId: provider === "google" ? String(profile.id) : "",
+    createdAt: new Date().toISOString()
+  };
+  await db.createUser(user);
+  return user;
 }
 
 async function currentUser(req) {
@@ -208,23 +314,29 @@ app.get("/api/me", async (req, res) => {
 
 app.post("/api/signup", async (req, res) => {
   const name = String(req.body.name || "").trim();
+  const username = String(req.body.username || "").trim();
   const phone = normalizePhone(req.body.phone);
   const password = String(req.body.password || "");
+  if (!validUsername(username)) return res.status(400).json({ error: "아이디는 4~20자의 영문·숫자·한글만 가능합니다." });
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
   if (password.length < 8) return res.status(400).json({ error: "비밀번호는 8자 이상이어야 합니다." });
+  if (await db.findUserByUsername(username)) {
+    return res.status(409).json({ error: "이미 사용 중인 아이디입니다." });
+  }
   if (await db.findUserByPhone(phone)) {
     return res.status(409).json({ error: "이미 가입된 휴대폰 번호입니다." });
   }
   const user = {
     id: "u_" + crypto.randomUUID(),
     name,
+    username,
     phone,
     passwordHash: hashPassword(password),
     role: process.env.ADMIN_PHONE && normalizePhone(process.env.ADMIN_PHONE) === phone ? "admin" : "user",
-    heriumLinked: false,
+    heriumLinked: true,
     heriumRelation: "",
-    heriumNote: "",
+    heriumNote: "herium_username=" + username,
     createdAt: new Date().toISOString()
   };
   await db.createUser(user);
@@ -232,17 +344,142 @@ app.post("/api/signup", async (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
+async function linkHeriumLogin(login, password, sharedUser) {
+  const herium = db.findHeriumAccount(login);
+  if (!herium || !herium.isActive) return null;
+  if (herium.status === "suspended" || herium.status === "withdrawn") return null;
+  if (!verifyDjangoPassword(password, herium.password)) return null;
+  if (!validPhone(herium.phone)) return null;
+  const passwordHash = hashPassword(password);
+  const samePerson = (user) => {
+    if (!user) return false;
+    const samePhone = normalizePhone(user.phone) === herium.phone;
+    const sameId = String(user.username || "").toLowerCase() === herium.username.toLowerCase();
+    return samePhone || sameId;
+  };
+  if (sharedUser && !samePerson(sharedUser)) return null;
+  const target = sharedUser && samePerson(sharedUser) ? sharedUser : await db.findUserByPhone(herium.phone);
+  if (target) {
+    await db.updatePassword(target.id, passwordHash);
+    await db.setUsername(target.id, herium.username);
+    return db.findUserById(target.id);
+  }
+  const created = {
+    id: "u_" + crypto.randomUUID(),
+    name: String(herium.name || herium.username).slice(0, 40),
+    username: herium.username,
+    phone: herium.phone,
+    passwordHash,
+    role: herium.isStaff || herium.role === "admin" ? "admin" : "user",
+    heriumLinked: true,
+    heriumRelation: "",
+    heriumNote: "herium_username=" + herium.username,
+    createdAt: new Date().toISOString()
+  };
+  try {
+    await db.createUser(created);
+    return created;
+  } catch (_err) {
+    const again = await db.findUserByPhone(herium.phone);
+    if (!again) return null;
+    await db.updatePassword(again.id, passwordHash);
+    await db.setUsername(again.id, herium.username);
+    return db.findUserById(again.id);
+  }
+}
+
 app.post("/api/login", async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
   if (tooMany(ip)) return res.status(429).json({ error: "잠시 후 다시 시도해 주세요." });
+  const login = String(req.body.login || req.body.username || req.body.phone || "").trim();
+  const password = String(req.body.password || "");
+  const user = await db.findUserByLogin(login);
+  if (user && verifyPassword(password, user.passwordHash)) {
+    setSession(res, user.id);
+    return res.json({ user: publicUser(user) });
+  }
+  const linked = await linkHeriumLogin(login, password, user);
+  if (!linked) {
+    return res.status(401).json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+  }
+  setSession(res, linked.id);
+  res.json({ user: publicUser(linked) });
+});
+
+app.post("/api/find-id", async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const phone = normalizePhone(req.body.phone);
+  if (name.length < 2 || !validPhone(phone)) {
+    return res.status(400).json({ error: "이름과 휴대폰 번호를 확인해 주세요." });
+  }
+  const user = await db.findUserByPhone(phone);
+  if (user && sameName(user.name, name)) {
+    return res.json({ username: user.username || "", phone: user.phone });
+  }
+  const herium = db.findHeriumByNamePhone(name, phone);
+  if (!herium || herium.status === "suspended" || herium.status === "withdrawn" || !herium.isActive) {
+    return res.status(404).json({ error: "일치하는 회원 정보가 없습니다." });
+  }
+  res.json({ username: herium.username || "", phone: herium.phone });
+});
+
+app.post("/api/reset-password", async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const login = String(req.body.login || req.body.username || "").trim();
   const phone = normalizePhone(req.body.phone);
   const password = String(req.body.password || "");
-  const user = await db.findUserByPhone(phone);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
-    return res.status(401).json({ error: "휴대폰 번호 또는 비밀번호가 올바르지 않습니다." });
+  if (name.length < 2 || !login || !validPhone(phone)) {
+    return res.status(400).json({ error: "아이디, 이름, 휴대폰 번호를 확인해 주세요." });
   }
-  setSession(res, user.id);
-  res.json({ user: publicUser(user) });
+  if (password.length < 8) return res.status(400).json({ error: "새 비밀번호는 8자 이상이어야 합니다." });
+  const user = await db.findUserByLogin(login);
+  if (!user || !sameName(user.name, name) || normalizePhone(user.phone) !== phone) {
+    return res.status(404).json({ error: "일치하는 회원 정보가 없습니다." });
+  }
+  await db.updatePassword(user.id, hashPassword(password));
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/providers", (_req, res) => {
+  res.json({
+    kakao: oauth.enabled("kakao"),
+    naver: oauth.enabled("naver"),
+    google: oauth.enabled("google")
+  });
+});
+
+app.get("/api/auth/:provider", (req, res) => {
+  const provider = String(req.params.provider || "");
+  if (["kakao", "naver", "google"].indexOf(provider) < 0) {
+    return res.redirect("/login.html?error=" + encodeURIComponent("지원하지 않는 로그인입니다."));
+  }
+  if (!oauth.enabled(provider)) {
+    return res.redirect("/login.html?error=" + encodeURIComponent("간편 로그인 키가 아직 등록되지 않았습니다."));
+  }
+  const state = oauth.randomState();
+  setOauth(res, { s: state, next: safeNext(req.query.next) });
+  res.redirect(oauth.authorizeUrl(SITE, provider, state));
+});
+
+app.get("/api/auth/:provider/callback", async (req, res) => {
+  const provider = String(req.params.provider || "");
+  const fail = (msg) => res.redirect("/login.html?error=" + encodeURIComponent(msg));
+  if (["kakao", "naver", "google"].indexOf(provider) < 0) return fail("지원하지 않는 로그인입니다.");
+  const payload = unsign(parseCookies(req).hm_oauth);
+  clearOauth(res);
+  if (!payload || payload.s !== String(req.query.state || "")) return fail("로그인 확인에 실패했습니다. 다시 시도해 주세요.");
+  if (req.query.error) return fail("소셜 로그인이 취소되었습니다.");
+  const code = String(req.query.code || "");
+  if (!code) return fail("인증 코드가 없습니다.");
+  try {
+    const profile = await oauth.profile(SITE, provider, code);
+    if (!profile.id) return fail("소셜 계정 정보를 읽지 못했습니다.");
+    const user = await upsertSocialUser(provider, profile);
+    setSession(res, user.id);
+    res.redirect(payload.next || "/account.html");
+  } catch (err) {
+    fail(err.message || "소셜 로그인에 실패했습니다.");
+  }
 });
 
 app.post("/api/logout", (_req, res) => {

@@ -9,23 +9,47 @@
 </head>
 <body>
   <div id="site-header"></div>
-  <section class="page-hero">
+  <section class="auth-page">
     <div class="wrap">
-      <div class="crumbs">홈 · 로그인</div>
-      <h1>로그인</h1>
-      <p>주문 조회와 장바구니 주문을 위해 로그인해 주세요.</p>
-    </div>
-  </section>
-  <section class="section" style="padding-top:0">
-    <div class="wrap auth-wrap">
-      <form class="panel form" id="login-form">
-        <label>휴대폰 번호</label>
-        <input name="phone" required placeholder="010-0000-0000" autocomplete="username" />
-        <label>비밀번호</label>
-        <input name="password" type="password" required minlength="8" placeholder="8자 이상" autocomplete="current-password" />
+      <div class="auth-intro">
+        <h1>안전하고 편안한 현대 의료기</h1>
+        <p>복지용구와 의료기기를 상담부터 주문까지 한곳에서 이용하세요.<br>헤리움과 같은 아이디·휴대폰 번호로 로그인하면 주문할 수 있습니다.</p>
+      </div>
+      <form class="auth-card" id="login-form">
+        <h2>로그인</h2>
+        <div class="auth-field">
+          <label for="login-id">아이디</label>
+          <div class="auth-input">
+            <span class="ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 19c1.4-3.2 4-5 7-5s5.6 1.8 7 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <input id="login-id" name="login" required placeholder="아이디 또는 휴대폰번호" autocomplete="username" />
+          </div>
+        </div>
+        <div class="auth-field">
+          <label for="login-password">비밀번호</label>
+          <div class="auth-input">
+            <span class="ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="6" y="10" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 10V8a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.8"/></svg>
+            </span>
+            <input id="login-password" name="password" type="password" required minlength="4" placeholder="비밀번호를 입력해 주세요" autocomplete="current-password" />
+            <button class="pw-toggle" type="button" data-toggle-pw aria-label="비밀번호 보기">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" stroke="currentColor" stroke-width="1.8"/></svg>
+            </button>
+          </div>
+        </div>
         <p class="form-error" id="login-error" hidden></p>
-        <button class="btn btn-teal btn-lg" type="submit" style="width:100%;margin-top:18px">로그인</button>
-        <p class="auth-switch">아직 계정이 없으신가요? <a href="signup.html">회원가입</a></p>
+        <button class="auth-submit" type="submit">로그인</button>
+        <nav class="auth-links">
+          <a href="signup.html">회원가입</a>
+          <a href="find-password.html">비밀번호찾기</a>
+          <a href="find-id.html">아이디찾기</a>
+        </nav>
+        <div class="auth-social">
+          <a class="social-btn social-kakao" data-social="kakao" href="/api/auth/kakao">카카오 로그인</a>
+          <a class="social-btn social-naver" data-social="naver" href="/api/auth/naver">네이버 로그인</a>
+          <a class="social-btn social-google" data-social="google" href="/api/auth/google">Google 로그인</a>
+        </div>
       </form>
     </div>
   </section>

@@ -64,17 +64,32 @@ async function runScript(script) {
   for (const part of parts) await exec(part);
 }
 
+function usernameFromNote(note) {
+  const parts = String(note || "").split(";");
+  for (const part of parts) {
+    const item = part.trim();
+    const key = "herium_username=";
+    if (item.toLowerCase().startsWith(key)) return item.slice(key.length).trim();
+  }
+  return "";
+}
+
 function mapUser(row) {
   if (!row) return null;
   return {
     id: row.id,
     name: row.name,
     phone: row.phone,
-    passwordHash: row.password_hash,
+    username: row.username || usernameFromNote(row.herium_note),
+    email: row.email || "",
+    passwordHash: row.password_hash || row.password || "",
     role: row.role || "user",
     heriumLinked: Boolean(Number(row.herium_linked)),
     heriumRelation: row.herium_relation || "",
     heriumNote: row.herium_note || "",
+    kakaoId: row.kakao_id || "",
+    naverId: row.naver_id || "",
+    googleId: row.google_id || "",
     createdAt: row.created_at
   };
 }
@@ -152,6 +167,7 @@ async function init() {
     }
   }
   await migrateJson();
+  await ensureColumns();
 }
 
 async function findUserById(id) {
@@ -159,15 +175,180 @@ async function findUserById(id) {
   return mapUser(rows[0]);
 }
 
+async function ensureColumns() {
+  const cols = [
+    ["username", "TEXT"],
+    ["email", "TEXT"],
+    ["kakao_id", "TEXT"],
+    ["naver_id", "TEXT"],
+    ["google_id", "TEXT"],
+    ["herium_linked", "INTEGER"],
+    ["herium_relation", "TEXT"],
+    ["herium_note", "TEXT"]
+  ];
+  for (const [name, type] of cols) {
+    try {
+      if (driver === "pg") await exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + name + " " + type);
+      else await exec("ALTER TABLE users ADD COLUMN " + name + " " + type);
+    } catch (_e) {}
+  }
+}
+
 async function findUserByPhone(phone) {
-  const rows = await exec("SELECT * FROM users WHERE phone = ? LIMIT 1", [phone]);
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return null;
+  const dashed = digits.length === 11
+    ? digits.slice(0, 3) + "-" + digits.slice(3, 7) + "-" + digits.slice(7)
+    : digits.length === 10
+      ? digits.slice(0, 3) + "-" + digits.slice(3, 6) + "-" + digits.slice(6)
+      : digits;
+  const intl = digits.charAt(0) === "0" ? "+82" + digits.slice(1) : digits;
+  const rows = await exec(
+    "SELECT * FROM users WHERE phone = ? OR phone = ? OR phone = ? OR phone = ? LIMIT 1",
+    [digits, dashed, String(phone || "").trim(), intl]
+  );
+  return mapUser(rows[0]);
+}
+
+async function findUserByUsername(username) {
+  const login = String(username || "").trim();
+  if (!login) return null;
+  const rows = await exec("SELECT * FROM users WHERE lower(username) = lower(?) LIMIT 1", [login]);
+  if (rows[0]) return mapUser(rows[0]);
+  const noted = await exec("SELECT * FROM users WHERE herium_note LIKE ?", ["%herium_username=%"]);
+  const hit = noted.find((row) => usernameFromNote(row.herium_note).toLowerCase() === login.toLowerCase());
+  if (!hit) return null;
+  const parsed = usernameFromNote(hit.herium_note);
+  if (!hit.username && parsed) {
+    await exec("UPDATE users SET username = ? WHERE id = ? AND (username IS NULL OR username = '')", [parsed, hit.id]);
+    hit.username = parsed;
+  }
+  return mapUser(hit);
+}
+
+function heriumDbPath() {
+  return path.join(__dirname, "..", "..", "홈페이지", "db.sqlite3");
+}
+
+function withHerium(read) {
+  if (driver !== "sqlite") return null;
+  const file = heriumDbPath();
+  if (!fs.existsSync(file)) return null;
+  let herium = null;
+  try {
+    const Database = require("better-sqlite3");
+    herium = new Database(file, { readonly: true, fileMustExist: true, timeout: 5000 });
+    return read(herium);
+  } catch (err) {
+    console.error("herium sqlite read failed:", err.message);
+    return null;
+  } finally {
+    if (herium) herium.close();
+  }
+}
+
+function heriumSelect(herium) {
+  const cols = herium.prepare("PRAGMA table_info(accounts_profile)").all().map((col) => col.name);
+  const role = cols.includes("role") ? "p.role" : "'member'";
+  const status = cols.includes("status") ? "p.status" : "'active'";
+  return herium.prepare(
+    "SELECT u.username, u.password, u.first_name, u.is_active, u.is_staff, " +
+    "p.name AS profile_name, p.phone AS profile_phone, " +
+    role + " AS profile_role, " + status + " AS profile_status " +
+    "FROM auth_user u LEFT JOIN accounts_profile p ON p.user_id = u.id"
+  ).all();
+}
+
+function mapHerium(row) {
+  if (!row) return null;
+  return {
+    username: row.username || "",
+    password: row.password || "",
+    name: row.profile_name || row.first_name || row.username || "",
+    phone: String(row.profile_phone || "").replace(/\D/g, ""),
+    isActive: Number(row.is_active) === 1,
+    isStaff: Number(row.is_staff) === 1,
+    role: row.profile_role || "member",
+    status: row.profile_status || "active"
+  };
+}
+
+function findHeriumAccount(login) {
+  const loginId = String(login || "").trim();
+  const digits = loginId.replace(/\D/g, "");
+  return withHerium((herium) => {
+    const hit = heriumSelect(herium).find((row) => {
+      if (String(row.username || "").toLowerCase() === loginId.toLowerCase()) return true;
+      const phone = String(row.profile_phone || "").replace(/\D/g, "");
+      return /^01[016789]\d{7,8}$/.test(digits) && phone === digits;
+    });
+    return mapHerium(hit);
+  });
+}
+
+function findHeriumByNamePhone(name, phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  const wanted = String(name || "").replace(/\s/g, "");
+  if (!digits || !wanted) return null;
+  return withHerium((herium) => {
+    const hit = heriumSelect(herium).find((row) => {
+      const rowName = String(row.profile_name || row.first_name || "").replace(/\s/g, "");
+      const rowPhone = String(row.profile_phone || "").replace(/\D/g, "");
+      return rowName === wanted && rowPhone === digits;
+    });
+    return mapHerium(hit);
+  });
+}
+
+async function setUsername(id, username) {
+  const login = String(username || "").trim();
+  if (!id || !login) return;
+  await exec("UPDATE users SET username = ? WHERE id = ? AND (username IS NULL OR username = '')", [login, id]);
+}
+
+async function findUserByLogin(raw) {
+  const login = String(raw || "").trim();
+  const phone = login.replace(/\D/g, "");
+  if (/^01[016789]\d{7,8}$/.test(phone)) {
+    const byPhone = await findUserByPhone(phone);
+    if (byPhone) return byPhone;
+  }
+  return findUserByUsername(login);
+}
+
+async function findUserBySocial(provider, socialId) {
+  const col = { kakao: "kakao_id", naver: "naver_id", google: "google_id" }[provider];
+  if (!col || !socialId) return null;
+  const rows = await exec("SELECT * FROM users WHERE " + col + " = ? LIMIT 1", [String(socialId)]);
+  return mapUser(rows[0]);
+}
+
+async function findUserByEmail(email) {
+  const value = String(email || "").trim();
+  if (!value) return null;
+  const rows = await exec("SELECT * FROM users WHERE email = ? LIMIT 1", [value]);
+  return mapUser(rows[0]);
+}
+
+async function linkSocial(id, provider, socialId) {
+  const col = { kakao: "kakao_id", naver: "naver_id", google: "google_id" }[provider];
+  if (!col) return;
+  await exec("UPDATE users SET " + col + " = ? WHERE id = ?", [String(socialId), id]);
+}
+
+async function updatePassword(id, passwordHash) {
+  await exec("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, id]);
+}
+
+async function findUserByNamePhone(name, phone) {
+  const rows = await exec("SELECT * FROM users WHERE name = ? AND phone = ? LIMIT 1", [name, phone]);
   return mapUser(rows[0]);
 }
 
 async function createUser(user) {
   await exec(
-    `INSERT INTO users (id, name, phone, password_hash, role, herium_linked, herium_relation, herium_note, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, name, phone, password_hash, role, herium_linked, herium_relation, herium_note, created_at, username, email, kakao_id, naver_id, google_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user.id,
       user.name,
@@ -177,7 +358,12 @@ async function createUser(user) {
       user.heriumLinked ? 1 : 0,
       user.heriumRelation || "",
       user.heriumNote || "",
-      user.createdAt
+      user.createdAt,
+      user.username || null,
+      user.email || null,
+      user.kakaoId || null,
+      user.naverId || null,
+      user.googleId || null
     ]
   );
   return user;
@@ -226,6 +412,16 @@ module.exports = {
   init,
   findUserById,
   findUserByPhone,
+  findUserByUsername,
+  findUserByLogin,
+  findHeriumAccount,
+  findHeriumByNamePhone,
+  setUsername,
+  findUserBySocial,
+  findUserByEmail,
+  findUserByNamePhone,
+  linkSocial,
+  updatePassword,
   createUser,
   createOrder,
   listOrders,
