@@ -5,51 +5,52 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>로그인 | 현대 의료기</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <div id="site-header"></div>
-  <section class="auth-page">
-    <div class="wrap">
-      <div class="auth-intro">
-        <h1>안전하고 편안한 현대 의료기</h1>
-        <p>복지용구와 의료기기를 상담부터 주문까지 한곳에서 이용하세요.<br>헤리움과 같은 아이디·휴대폰 번호로 로그인하면 주문할 수 있습니다.</p>
-      </div>
+  <section class="auth-page login-match">
+    <div class="auth-inner">
+      <section class="auth-hero">
+        <span class="eyebrow">현대 의료기</span>
+        <h1>안전하고 편안한 <span>현대 의료기</span></h1>
+        <p>복지용구와 의료기기를 상담부터 주문까지 한곳에서 이용하세요.<br>비회원도 휴대폰 번호만으로 주문할 수 있습니다.</p>
+      </section>
       <form class="auth-card" id="login-form">
         <h2>로그인</h2>
+        <p class="form-error" id="login-error" hidden></p>
         <div class="auth-field">
-          <label for="login-id">아이디</label>
+          <label for="login-id">아이디 또는 휴대폰 번호</label>
           <div class="auth-input">
-            <span class="ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 19c1.4-3.2 4-5 7-5s5.6 1.8 7 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </span>
-            <input id="login-id" name="login" required placeholder="아이디 또는 휴대폰번호" autocomplete="username" />
+            <i class="fas fa-user field-icon"></i>
+            <input id="login-id" name="login" required placeholder="아이디 또는 휴대폰 번호" autocomplete="username" />
           </div>
         </div>
         <div class="auth-field">
           <label for="login-password">비밀번호</label>
           <div class="auth-input">
-            <span class="ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="6" y="10" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 10V8a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.8"/></svg>
-            </span>
+            <i class="fas fa-lock field-icon"></i>
             <input id="login-password" name="password" type="password" required minlength="4" placeholder="비밀번호를 입력해 주세요" autocomplete="current-password" />
-            <button class="pw-toggle" type="button" data-toggle-pw aria-label="비밀번호 보기">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" stroke="currentColor" stroke-width="1.8"/></svg>
-            </button>
+            <button class="toggle-pw" type="button" data-toggle-pw aria-label="비밀번호 보기"><i class="fas fa-eye"></i></button>
           </div>
         </div>
-        <p class="form-error" id="login-error" hidden></p>
         <button class="auth-submit" type="submit">로그인</button>
         <nav class="auth-links">
           <a href="signup.html">회원가입</a>
-          <a href="find-password.html">비밀번호찾기</a>
-          <a href="find-id.html">아이디찾기</a>
+          <a href="find-password.html">비밀번호 찾기</a>
+          <a href="find-id.html">아이디 찾기</a>
         </nav>
-        <div class="auth-social">
-          <a class="social-btn social-kakao" data-social="kakao" href="/api/auth/kakao">카카오 로그인</a>
-          <a class="social-btn social-naver" data-social="naver" href="/api/auth/naver">네이버 로그인</a>
-          <a class="social-btn social-google" data-social="google" href="/api/auth/google">Google 로그인</a>
+        <p class="auth-or">또는</p>
+        <div class="auth-social-btns">
+          <a class="social-btn kakao" data-social="kakao" href="/api/auth/kakao" title="카카오 로그인"><i class="fas fa-comment"></i></a>
+          <a class="social-btn naver" data-social="naver" href="/api/auth/naver" title="네이버 로그인">N</a>
+          <a class="social-btn google" data-social="google" href="/api/auth/google" title="구글 로그인"><i class="fab fa-google"></i></a>
         </div>
+        <p class="auth-social-hint">카카오 · 네이버 · 구글 계정으로 간편 로그인</p>
       </form>
     </div>
   </section>

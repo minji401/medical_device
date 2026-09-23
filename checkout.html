@@ -13,7 +13,7 @@
     <div class="wrap">
       <div class="crumbs">홈 · 주문</div>
       <h1>주문 접수</h1>
-      <p>지금은 결제 없이 주문만 접수합니다. 확인 후 본인부담·배송을 안내드립니다.</p>
+      <p>회원 가입 없이 주문할 수 있습니다. 연락은 휴대폰 번호로 드립니다.</p>
     </div>
   </section>
   <section class="section" style="padding-top:0">
@@ -25,16 +25,17 @@
       </div>
       <form class="panel form" id="checkout-form">
         <h2>배송·연락 정보</h2>
-        <label>이름</label>
-        <input name="name" required placeholder="홍길동" />
+        <label>이름 (선택)</label>
+        <input name="name" value="" autocomplete="name" />
         <label>휴대폰 번호</label>
-        <input name="phone" required placeholder="010-0000-0000" />
+        <input name="phone" required value="" autocomplete="tel" />
         <label>배송·설치 주소</label>
-        <input name="address" required placeholder="경북 영천시 …" />
+        <input name="address" required value="" autocomplete="street-address" />
         <label>요청 사항</label>
         <textarea name="memo" placeholder="방문 시간, 설치 장소, 등급 여부를 적어 주세요."></textarea>
         <p class="form-error" id="checkout-error" hidden></p>
         <button class="btn btn-teal btn-lg" type="submit" style="width:100%;margin-top:18px">주문 접수하기</button>
+        <p id="checkout-done" class="auth-result" hidden></p>
       </form>
     </div>
   </section>

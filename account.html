@@ -25,6 +25,24 @@
         </div>
         <button class="btn btn-outline" id="logout-btn" type="button">로그아웃</button>
       </div>
+      <form class="panel form" id="profile-form" style="margin-top:18px">
+        <h2>내 정보</h2>
+        <p class="muted">의료기에서 보는 이름입니다. 헤리움 보호자 성함과는 따로 수정됩니다.</p>
+        <label>아이디</label>
+        <input name="username" readonly />
+        <label>이름</label>
+        <input name="name" required placeholder="이름" />
+        <label>휴대폰 번호</label>
+        <input name="phone" required placeholder="010-0000-0000" />
+        <label>배송·설치 주소</label>
+        <input name="address" placeholder="다음 주문에 미리 넣어 둡니다" />
+        <label>현재 비밀번호</label>
+        <input name="currentPassword" type="password" placeholder="비밀번호를 바꿀 때만 입력" />
+        <label>새 비밀번호</label>
+        <input name="newPassword" type="password" minlength="8" placeholder="8자 이상, 바꾸지 않으면 비워 두세요" />
+        <p class="form-error" id="profile-error" hidden></p>
+        <button class="btn btn-teal" type="submit" style="margin-top:12px">저장</button>
+      </form>
       <div class="section-head" style="margin-top:32px">
         <div>
           <h2>주문·상담 내역</h2>

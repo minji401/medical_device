@@ -8,9 +8,13 @@ const oauth = require("./server/oauth");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
-const SECRET = process.env.SESSION_SECRET || "hyundai-medical-dev-secret";
-const COOKIE = "hm_session";
 const IS_PROD = process.env.NODE_ENV === "production";
+const SECRET = process.env.SESSION_SECRET || (IS_PROD ? "" : "hyundai-medical-dev-secret");
+const COOKIE = "hm_session";
+if (IS_PROD && !SECRET) {
+  console.error("SESSION_SECRET이 없습니다. 배포 환경변수에 넣어 주세요.");
+  process.exit(1);
+}
 
 const catalog = vm.runInNewContext(
   fs.readFileSync(path.join(ROOT, "js", "data.js"), "utf8") + "\n({ PRODUCTS, GROUPS, CATEGORIES, copay, productById, productGroup, isWelfare })"
@@ -202,6 +206,7 @@ function publicUser(user) {
     phone,
     username: user.username || "",
     email: user.email || "",
+    address: user.address || "",
     role: user.role || "user"
   };
 }
@@ -312,6 +317,29 @@ app.get("/api/me", async (req, res) => {
   res.json({ user: publicUser(await currentUser(req)) });
 });
 
+app.patch("/api/me", requireUser, async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const phone = normalizePhone(req.body.phone);
+  const address = String(req.body.address || "").trim().slice(0, 200);
+  const password = String(req.body.password || "");
+  const current = String(req.body.currentPassword || "");
+  if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
+  if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
+  const taken = await db.findUserByPhone(phone);
+  if (taken && taken.id !== req.user.id) {
+    return res.status(409).json({ error: "이미 사용 중인 휴대폰 번호입니다." });
+  }
+  if (password) {
+    if (password.length < 8) return res.status(400).json({ error: "새 비밀번호는 8자 이상이어야 합니다." });
+    if (!verifyPassword(current, req.user.passwordHash)) {
+      return res.status(400).json({ error: "현재 비밀번호가 일치하지 않습니다." });
+    }
+    await db.updatePassword(req.user.id, hashPassword(password));
+  }
+  await db.updateBuyerProfile(req.user.id, { name, phone, address });
+  res.json({ user: publicUser(await db.findUserById(req.user.id)) });
+});
+
 app.post("/api/signup", async (req, res) => {
   const name = String(req.body.name || "").trim();
   const username = String(req.body.username || "").trim();
@@ -334,7 +362,7 @@ app.post("/api/signup", async (req, res) => {
     phone,
     passwordHash: hashPassword(password),
     role: process.env.ADMIN_PHONE && normalizePhone(process.env.ADMIN_PHONE) === phone ? "admin" : "user",
-    heriumLinked: true,
+    heriumLinked: false,
     heriumRelation: "",
     heriumNote: "herium_username=" + username,
     createdAt: new Date().toISOString()
@@ -362,16 +390,18 @@ async function linkHeriumLogin(login, password, sharedUser) {
   if (target) {
     await db.updatePassword(target.id, passwordHash);
     await db.setUsername(target.id, herium.username);
+    if (herium.name) await db.setGuardianName(target.id, herium.name);
     return db.findUserById(target.id);
   }
   const created = {
     id: "u_" + crypto.randomUUID(),
-    name: String(herium.name || herium.username).slice(0, 40),
+    name: "",
     username: herium.username,
     phone: herium.phone,
     passwordHash,
     role: herium.isStaff || herium.role === "admin" ? "admin" : "user",
     heriumLinked: true,
+    guardianName: String(herium.name || "").slice(0, 40),
     heriumRelation: "",
     heriumNote: "herium_username=" + herium.username,
     createdAt: new Date().toISOString()
@@ -523,9 +553,8 @@ app.post("/api/orders", async (req, res) => {
   const memo = String(req.body.memo || "").trim().slice(0, 1000);
   const topics = Array.isArray(req.body.topics) ? req.body.topics.map((t) => String(t).slice(0, 40)).slice(0, 12) : [];
 
-  if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
+  if (type !== "order" && name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
-  if (type === "order" && !user) return res.status(401).json({ error: "주문은 로그인 후 가능합니다." });
   if (type === "order" && address.length < 5) return res.status(400).json({ error: "배송·설치 주소를 입력해 주세요." });
 
   const built = buildItems(req.body.items);
@@ -536,7 +565,7 @@ app.post("/api/orders", async (req, res) => {
     number: "HM" + Date.now().toString().slice(-10),
     userId: user ? user.id : null,
     type,
-    name,
+    name: name || (type === "order" ? "비회원" : name),
     phone,
     address,
     memo,
@@ -547,6 +576,13 @@ app.post("/api/orders", async (req, res) => {
     createdAt: new Date().toISOString()
   };
   await db.createOrder(order);
+  if (user && type === "order" && address) {
+    await db.updateBuyerProfile(user.id, {
+      name: name || user.name || "",
+      phone: phone || normalizePhone(user.phone),
+      address
+    });
+  }
   res.json({ order: { id: order.id, number: order.number, status: order.status } });
 });
 

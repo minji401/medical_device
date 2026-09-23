@@ -767,7 +767,7 @@ function initAccount() {
       location.href = "login.html#next=account.html";
       return;
     }
-    document.querySelector("#account-name").textContent = user.name + "님";
+    document.querySelector("#account-name").textContent = (user.name || user.username || "회원") + "님";
     const bits = [];
     if (user.username) bits.push("아이디 " + user.username);
     bits.push(user.phone || "휴대폰 미등록");
@@ -777,6 +777,35 @@ function initAccount() {
       await api("/api/logout", { method: "POST", body: "{}" });
       location.href = "index.html";
     };
+    const profile = document.querySelector("#profile-form");
+    if (profile) {
+      profile.username.value = user.username || "";
+      profile.name.value = user.name || "";
+      profile.phone.value = user.phone || "";
+      profile.address.value = user.address || "";
+      profile.onsubmit = async (e) => {
+        e.preventDefault();
+        showFormError("#profile-error", "");
+        try {
+          const saved = await api("/api/me", {
+            method: "PATCH",
+            body: JSON.stringify({
+              name: profile.name.value,
+              phone: profile.phone.value,
+              address: profile.address.value,
+              currentPassword: profile.currentPassword.value,
+              password: profile.newPassword.value
+            })
+          });
+          profile.currentPassword.value = "";
+          profile.newPassword.value = "";
+          document.querySelector("#account-name").textContent = (saved.user.name || saved.user.username || "회원") + "님";
+          toast("개인정보를 저장했습니다.");
+        } catch (err) {
+          showFormError("#profile-error", err.message);
+        }
+      };
+    }
     try {
       const data = await api("/api/orders");
       const box = document.querySelector("#order-list");
@@ -837,14 +866,18 @@ function initAccount() {
 function initCheckout() {
   mountShell("shop");
   refreshAuth().then((user) => {
-    if (!user) {
-      location.href = "login.html#next=checkout.html";
-      return;
-    }
     const form = document.querySelector("#checkout-form");
     if (form) {
-      form.name.value = user.name;
-      form.phone.value = user.phone || "";
+      if (user) {
+        form.name.value = user.name || "";
+        form.phone.value = user.phone || "";
+        form.address.value = user.address || "";
+      } else {
+        form.setAttribute("autocomplete", "off");
+        form.name.value = "";
+        form.phone.value = "";
+        form.address.value = "";
+      }
     }
     const items = cart();
     const box = document.querySelector("#checkout-items");
@@ -883,8 +916,17 @@ function initCheckout() {
           })
         });
         saveCart([]);
-        toast("주문이 접수되었습니다. " + result.order.number);
-        location.href = "account.html";
+        if (user) {
+          toast("주문이 접수되었습니다. " + result.order.number);
+          location.href = "account.html";
+          return;
+        }
+        const done = document.querySelector("#checkout-done");
+        if (done) {
+          done.hidden = false;
+          done.textContent = "주문이 접수되었습니다. 접수번호 " + result.order.number + " · 입력하신 휴대폰 번호로 연락드립니다.";
+        }
+        form.querySelector("button[type=submit]").disabled = true;
       } catch (err) {
         showFormError("#checkout-error", err.message);
       }

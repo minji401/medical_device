@@ -87,6 +87,8 @@ function mapUser(row) {
     heriumLinked: Boolean(Number(row.herium_linked)),
     heriumRelation: row.herium_relation || "",
     heriumNote: row.herium_note || "",
+    guardianName: row.guardian_name || "",
+    address: row.address || "",
     kakaoId: row.kakao_id || "",
     naverId: row.naver_id || "",
     googleId: row.google_id || "",
@@ -184,7 +186,9 @@ async function ensureColumns() {
     ["google_id", "TEXT"],
     ["herium_linked", "INTEGER"],
     ["herium_relation", "TEXT"],
-    ["herium_note", "TEXT"]
+    ["herium_note", "TEXT"],
+    ["guardian_name", "TEXT"],
+    ["address", "TEXT"]
   ];
   for (const [name, type] of cols) {
     try {
@@ -340,6 +344,19 @@ async function updatePassword(id, passwordHash) {
   await exec("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, id]);
 }
 
+async function updateBuyerProfile(id, fields) {
+  await exec(
+    "UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?",
+    [fields.name, fields.phone, fields.address || "", id]
+  );
+}
+
+async function setGuardianName(id, guardianName) {
+  const name = String(guardianName || "").trim();
+  if (!id || !name) return;
+  await exec("UPDATE users SET guardian_name = ?, herium_linked = 1 WHERE id = ?", [name, id]);
+}
+
 async function findUserByNamePhone(name, phone) {
   const rows = await exec("SELECT * FROM users WHERE name = ? AND phone = ? LIMIT 1", [name, phone]);
   return mapUser(rows[0]);
@@ -347,8 +364,8 @@ async function findUserByNamePhone(name, phone) {
 
 async function createUser(user) {
   await exec(
-    `INSERT INTO users (id, name, phone, password_hash, role, herium_linked, herium_relation, herium_note, created_at, username, email, kakao_id, naver_id, google_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, name, phone, password_hash, role, herium_linked, herium_relation, herium_note, created_at, username, email, kakao_id, naver_id, google_id, guardian_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user.id,
       user.name,
@@ -363,7 +380,8 @@ async function createUser(user) {
       user.email || null,
       user.kakaoId || null,
       user.naverId || null,
-      user.googleId || null
+      user.googleId || null,
+      user.guardianName || null
     ]
   );
   return user;
@@ -422,6 +440,8 @@ module.exports = {
   findUserByNamePhone,
   linkSocial,
   updatePassword,
+  updateBuyerProfile,
+  setGuardianName,
   createUser,
   createOrder,
   listOrders,
