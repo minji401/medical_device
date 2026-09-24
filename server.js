@@ -58,7 +58,7 @@ function xmlUrl(loc, changefreq, priority) {
 
 app.get("/robots.txt", (_req, res) => {
   res.type("text/plain").send(
-    "User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /account\nDisallow: /checkout\nSitemap: " + SITE + "/sitemap.xml\n"
+    "User-agent: Yeti\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /account\nDisallow: /checkout\nSitemap: " + SITE + "/sitemap.xml\n"
   );
 });
 
