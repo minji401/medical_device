@@ -197,16 +197,36 @@ ul { list-style: none; }
   width: min(var(--max), calc(100% - 32px));
   margin: 16px auto 0;
   border-radius: 28px;
-  background:
-    linear-gradient(90deg, rgba(255,255,255,.92) 0%, rgba(255,255,255,.72) 42%, rgba(255,255,255,.38) 58%, rgba(255,255,255,.12) 68%, transparent 74%),
-    url("https://images.unsplash.com/photo-1581579438747-1dc8d17bbce4?auto=format&fit=crop&w=1800&q=80") 58% 18% / cover;
+  background: linear-gradient(90deg, rgba(255,255,255,.92) 0%, rgba(255,255,255,.72) 42%, rgba(255,255,255,.38) 58%, rgba(255,255,255,.12) 68%, transparent 74%);
   color: var(--ink);
   min-height: 560px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
 }
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: url("https://images.unsplash.com/photo-1543333995-a78aea2eee50?auto=format&fit=crop&w=1800&q=80") 22% center / cover no-repeat;
+  transform: scaleX(-1);
+  pointer-events: none;
+}
 .hero::after { display: none; }
+.hero-inner, .hero-phone { position: relative; z-index: 1; }
+.hero .btn-primary,
+.hero .btn-ghost {
+  background: rgba(255,255,255,.94);
+  color: var(--ink);
+  border: 1px solid rgba(43,38,31,.35);
+}
+.hero .btn-primary:hover,
+.hero .btn-ghost:hover {
+  background: var(--teal-dark);
+  color: #fff;
+  border-color: var(--teal-dark);
+}
 .hero-inner { padding: 64px 48px 36px; max-width: 640px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
 .eyebrow {
   display: inline-flex;
@@ -1071,9 +1091,11 @@ body:has(.auth-page) .mobile-nav { display: none; }
   .hero {
     min-height: 520px;
     width: calc(100% - 24px);
-    background:
-      linear-gradient(180deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.5) 52%, rgba(255,255,255,.14) 68%, transparent 76%),
-      url("https://images.unsplash.com/photo-1581579438747-1dc8d17bbce4?auto=format&fit=crop&w=1400&q=80") 48% 12% / cover;
+    background: linear-gradient(180deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.5) 52%, rgba(255,255,255,.14) 68%, transparent 76%);
+  }
+  .hero::before {
+    background-image: url("https://images.unsplash.com/photo-1543333995-a78aea2eee50?auto=format&fit=crop&w=1400&q=80");
+    background-position: 18% center;
   }
   .hero-inner { padding: 40px 20px 28px; }
   .section { padding: 48px 0; }
