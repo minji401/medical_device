@@ -216,16 +216,19 @@ ul { list-style: none; }
 .hero::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 72%;
+  height: 92%;
   z-index: 0;
   pointer-events: none;
-  background: radial-gradient(
-    ellipse 34% 40% at 0% 0%,
-    rgba(255,252,246,.97) 0%,
-    rgba(255,252,246,.94) 58%,
-    rgba(255,252,246,.82) 76%,
-    rgba(255,252,246,.38) 88%,
-    transparent 100%
+  background: linear-gradient(
+    to bottom right,
+    rgba(255,255,255,.98) 0%,
+    rgba(255,255,255,.92) 22%,
+    rgba(255,255,255,.7) 38%,
+    rgba(255,255,255,.28) 52%,
+    transparent 66%
   );
 }
 .hero-inner, .hero-phone { position: relative; z-index: 1; }
@@ -1115,6 +1118,10 @@ body:has(.auth-page) .mobile-nav { display: none; }
     background: #f7f4ee;
   }
   .hero::after {
+    inset: 0;
+    width: auto;
+    height: auto;
+    filter: none;
     background: radial-gradient(
       ellipse 60% 40% at 0% 0%,
       rgba(255,252,246,.97) 0%,
