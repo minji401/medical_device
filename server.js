@@ -5,6 +5,10 @@ const vm = require("vm");
 const express = require("express");
 const db = require("./server/db");
 const oauth = require("./server/oauth");
+const security = require("./server/security");
+const payments = require("./server/payments");
+const guard = require("./server/guard");
+const { cleanText } = require("./server/pii");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
@@ -24,11 +28,15 @@ const SITE = (process.env.SITE_URL || "https://hyundaimedi.com").replace(/\/$/, 
 
 const app = express();
 app.disable("x-powered-by");
+app.get("/healthz", (_req, res) => res.type("text").send("ok"));
+app.use(guard.stagingAuth);
+app.use(guard.securityHeaders);
 app.use(express.json({ limit: "200kb" }));
+app.use(guard.requireFetchHeader);
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "find-id", "find-password", "account", "checkout", "sitemap"
+  "login", "signup", "find-id", "find-password", "reset-password", "account", "checkout", "payment-success", "payment-fail", "sitemap"
 ];
 
 app.use("/css", express.static(path.join(ROOT, "css")));
@@ -260,6 +268,7 @@ async function upsertSocialUser(provider, profile) {
       return byEmail;
     }
   }
+  if (!guard.registrationOpen()) return null;
   let username = String((profile.email && profile.email.split("@")[0]) || provider + String(profile.id).slice(-6))
     .replace(/[^a-zA-Z0-9가-힣_]/g, "")
     .slice(0, 20);
@@ -321,6 +330,7 @@ app.patch("/api/me", requireUser, async (req, res) => {
   const name = String(req.body.name || "").trim();
   const phone = normalizePhone(req.body.phone);
   const address = String(req.body.address || "").trim().slice(0, 200);
+  const email = String(req.body.email || "").trim();
   const password = String(req.body.password || "");
   const current = String(req.body.currentPassword || "");
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
@@ -329,36 +339,58 @@ app.patch("/api/me", requireUser, async (req, res) => {
   if (taken && taken.id !== req.user.id) {
     return res.status(409).json({ error: "이미 사용 중인 휴대폰 번호입니다." });
   }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "이메일 형식을 확인해 주세요." });
+  }
+  if (email) {
+    const emailTaken = await db.findUserByEmail(email);
+    if (emailTaken && emailTaken.id !== req.user.id) {
+      return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
+    }
+  }
   if (password) {
-    if (password.length < 8) return res.status(400).json({ error: "새 비밀번호는 8자 이상이어야 합니다." });
+    const policy = security.passwordError(password);
+    if (policy) return res.status(400).json({ error: policy });
     if (!verifyPassword(current, req.user.passwordHash)) {
       return res.status(400).json({ error: "현재 비밀번호가 일치하지 않습니다." });
     }
     await db.updatePassword(req.user.id, hashPassword(password));
   }
-  await db.updateBuyerProfile(req.user.id, { name, phone, address });
+  await db.updateBuyerProfile(req.user.id, { name, phone, address, email });
   res.json({ user: publicUser(await db.findUserById(req.user.id)) });
 });
 
 app.post("/api/signup", async (req, res) => {
+  if (!guard.registrationOpen()) {
+    return res.status(403).json({ error: "현재 정식 오픈 준비 중입니다." });
+  }
   const name = String(req.body.name || "").trim();
   const username = String(req.body.username || "").trim();
   const phone = normalizePhone(req.body.phone);
+  const email = String(req.body.email || "").trim();
   const password = String(req.body.password || "");
   if (!validUsername(username)) return res.status(400).json({ error: "아이디는 4~20자의 영문·숫자·한글만 가능합니다." });
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
-  if (password.length < 8) return res.status(400).json({ error: "비밀번호는 8자 이상이어야 합니다." });
+  const policy = security.passwordError(password);
+  if (policy) return res.status(400).json({ error: policy });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "이메일 형식을 확인해 주세요." });
+  }
   if (await db.findUserByUsername(username)) {
     return res.status(409).json({ error: "이미 사용 중인 아이디입니다." });
   }
   if (await db.findUserByPhone(phone)) {
     return res.status(409).json({ error: "이미 가입된 휴대폰 번호입니다." });
   }
+  if (email && await db.findUserByEmail(email)) {
+    return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
+  }
   const user = {
     id: "u_" + crypto.randomUUID(),
     name,
     username,
+    email,
     phone,
     passwordHash: hashPassword(password),
     role: process.env.ADMIN_PHONE && normalizePhone(process.env.ADMIN_PHONE) === phone ? "admin" : "user",
@@ -424,14 +456,29 @@ app.post("/api/login", async (req, res) => {
   const login = String(req.body.login || req.body.username || req.body.phone || "").trim();
   const password = String(req.body.password || "");
   const user = await db.findUserByLogin(login);
+  if (user) {
+    const locked = db.lockMessage(user);
+    if (locked) return res.status(423).json({ error: locked });
+    if (user.loginLockedUntil) {
+      await db.clearLoginFailure(user.id);
+      user.loginFailures = 0;
+      user.loginLockedUntil = "";
+    }
+  }
   if (user && verifyPassword(password, user.passwordHash)) {
+    await db.clearLoginFailure(user.id);
     setSession(res, user.id);
     return res.json({ user: publicUser(user) });
   }
   const linked = await linkHeriumLogin(login, password, user);
   if (!linked) {
+    if (user) {
+      const state = await db.noteLoginFailure(user.id, user.loginFailures);
+      if (state.locked) return res.status(423).json({ error: db.lockMessage({ loginLockedUntil: state.until }) });
+    }
     return res.status(401).json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
   }
+  await db.clearLoginFailure(linked.id);
   setSession(res, linked.id);
   res.json({ user: publicUser(linked) });
 });
@@ -453,21 +500,115 @@ app.post("/api/find-id", async (req, res) => {
   res.json({ username: herium.username || "", phone: herium.phone });
 });
 
-app.post("/api/reset-password", async (req, res) => {
+const resetHits = new Map();
+function resetTooMany(ip) {
+  const now = Date.now();
+  const row = resetHits.get(ip) || { n: 0, t: now };
+  if (now - row.t > 10 * 60 * 1000) {
+    row.n = 0;
+    row.t = now;
+  }
+  row.n += 1;
+  resetHits.set(ip, row);
+  return row.n > 8;
+}
+
+app.post("/api/forgot-password", async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  if (resetTooMany(ip)) return res.status(429).json({ error: "요청이 너무 많습니다. 10분 뒤에 다시 시도해 주세요." });
+  const email = String(req.body.email || "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "이메일 형식을 확인해 주세요." });
+  }
+  if (!security.mailConfigured()) {
+    return res.status(503).json({ error: "비밀번호 재설정 메일을 보낼 설정이 아직 없습니다. 관리자에게 문의해 주세요." });
+  }
+  const generic = { ok: true, message: "가입된 이메일이라면 재설정 링크를 보냈습니다. 30분 안에 메일을 확인해 주세요." };
+  const user = await db.findUserByEmail(email);
+  if (user) {
+    try {
+      const token = await db.issueResetToken(user.id);
+      const link = SITE + "/reset-password.html?token=" + encodeURIComponent(token);
+      await security.sendResetMail(email, link, "현대 의료기");
+    } catch (err) {
+      console.error("password reset mail failed");
+    }
+  }
+  res.json(generic);
+});
+
+app.post("/api/password-help", async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  if (guard.tooMany("password-help", ip, 8, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: "요청이 너무 많습니다. 10분 뒤에 다시 시도해 주세요." });
+  }
   const name = String(req.body.name || "").trim();
-  const login = String(req.body.login || req.body.username || "").trim();
   const phone = normalizePhone(req.body.phone);
+  if (name.length < 2 || !validPhone(phone)) {
+    return res.status(400).json({ error: "이름과 휴대폰 번호를 확인해 주세요." });
+  }
+  const sent = {
+    ok: true,
+    message: "요청을 접수했습니다. 고객센터(054-334-9986)에서 본인 확인 후 연락드립니다."
+  };
+  try {
+    const user = await db.findNoEmailMember(name, phone);
+    if (user) await db.openPasswordHelp(user.id, name, phone, "medical");
+  } catch (err) {
+    console.error("password help request failed");
+    return res.status(503).json({ error: "지금은 요청을 저장할 수 없습니다. 054-334-9986으로 전화해 주세요." });
+  }
+  res.json(sent);
+});
+
+app.get("/api/password-help", requireUser, async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ error: "관리자만 볼 수 있습니다." });
+  const items = await db.listPasswordHelp();
+  await db.writeAudit(req.user.id, "view_password_help", "open", req.ip || "");
+  res.json({
+    items: items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      phone: item.phone,
+      site: item.site,
+      createdAt: item.createdAt
+    }))
+  });
+});
+
+app.post("/api/password-help/:id/reset", requireUser, async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ error: "관리자만 변경할 수 있습니다." });
   const password = String(req.body.password || "");
-  if (name.length < 2 || !login || !validPhone(phone)) {
-    return res.status(400).json({ error: "아이디, 이름, 휴대폰 번호를 확인해 주세요." });
-  }
-  if (password.length < 8) return res.status(400).json({ error: "새 비밀번호는 8자 이상이어야 합니다." });
-  const user = await db.findUserByLogin(login);
-  if (!user || !sameName(user.name, name) || normalizePhone(user.phone) !== phone) {
-    return res.status(404).json({ error: "일치하는 회원 정보가 없습니다." });
-  }
-  await db.updatePassword(user.id, hashPassword(password));
+  const confirm = String(req.body.confirm || "");
+  if (password !== confirm) return res.status(400).json({ error: "비밀번호 확인이 일치하지 않습니다." });
+  const policy = security.passwordError(password);
+  if (policy) return res.status(400).json({ error: policy });
+  const item = await db.findOpenPasswordHelp(req.params.id);
+  if (!item) return res.status(404).json({ error: "요청을 찾을 수 없습니다." });
+  await db.updatePassword(item.userId, hashPassword(password));
+  await db.clearLoginFailure(item.userId);
+  await db.closePasswordHelp(item.id);
+  await db.writeAudit(req.user.id, "password_help_reset", item.id, req.ip || "");
   res.json({ ok: true });
+});
+
+app.post("/api/reset-password", async (req, res) => {
+  const token = String(req.body.token || "");
+  const password = String(req.body.password || "");
+  if (!token) return res.status(400).json({ error: "재설정 링크가 올바르지 않습니다." });
+  const policy = security.passwordError(password);
+  if (policy) return res.status(400).json({ error: policy });
+  const userId = await db.takeResetToken(token);
+  if (!userId) {
+    return res.status(400).json({ error: "재설정 링크가 없거나 만료되었습니다. 비밀번호 찾기에서 다시 요청해 주세요." });
+  }
+  await db.updatePassword(userId, hashPassword(password));
+  await db.clearLoginFailure(userId);
+  res.json({ ok: true });
+});
+
+app.get("/api/public-config", (_req, res) => {
+  res.json({ registrationOpen: guard.registrationOpen() });
 });
 
 app.get("/api/auth/providers", (_req, res) => {
@@ -505,6 +646,7 @@ app.get("/api/auth/:provider/callback", async (req, res) => {
     const profile = await oauth.profile(SITE, provider, code);
     if (!profile.id) return fail("소셜 계정 정보를 읽지 못했습니다.");
     const user = await upsertSocialUser(provider, profile);
+    if (!user) return fail("현재 정식 오픈 준비 중입니다.");
     setSession(res, user.id);
     res.redirect(payload.next || "/account.html");
   } catch (err) {
@@ -544,13 +686,33 @@ function buildItems(rawItems) {
   return { items, total };
 }
 
+payments.attach(app, {
+  buildItems,
+  currentUser,
+  normalizePhone,
+  validPhone,
+  updateBuyerProfile: db.updateBuyerProfile,
+  SITE
+});
+
 app.post("/api/orders", async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  if (guard.tooMany("orders", ip, 8, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: "잠시 후 다시 신청해 주세요." });
+  }
   const user = await currentUser(req);
   const type = req.body.type === "consult" ? "consult" : "order";
-  const name = String(req.body.name || (user && user.name) || "").trim();
+  let name = String(req.body.name || (user && user.name) || "").trim();
   const phone = normalizePhone(req.body.phone || (user && user.phone) || "");
-  const address = String(req.body.address || "").trim();
-  const memo = String(req.body.memo || "").trim().slice(0, 1000);
+  let address = String(req.body.address || "").trim();
+  let memo = String(req.body.memo || "").trim().slice(0, 1000);
+  try {
+    name = cleanText(name, 40);
+    address = cleanText(address, 200);
+    memo = cleanText(memo, 1000);
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "입력 내용을 확인해 주세요." });
+  }
   const topics = Array.isArray(req.body.topics) ? req.body.topics.map((t) => String(t).slice(0, 40)).slice(0, 12) : [];
 
   if (type !== "order" && name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
@@ -591,32 +753,39 @@ app.get("/api/orders", requireUser, async (req, res) => {
     all: req.user.role === "admin",
     userId: req.user.id
   });
+  const mask = req.user.role !== "admin";
+  if (!mask) {
+    await db.writeAudit(req.user.id, "view_orders", "all", req.ip || "");
+  }
   res.json({
-    orders: list.map((o) => ({
-      id: o.id,
-      number: o.number,
-      type: o.type,
-      name: o.name,
-      phone: o.phone,
-      address: o.address,
-      memo: o.memo,
-      topics: o.topics || [],
-      items: o.items,
-      total: o.total,
-      status: o.status,
-      createdAt: o.createdAt
-    }))
+    orders: list.map((o) => payments.publicOrder(o, mask))
   });
 });
 
 app.patch("/api/orders/:id", requireUser, async (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ error: "관리자만 변경할 수 있습니다." });
-  const allowed = ["received", "reviewing", "confirmed", "cancelled"];
+  const allowed = ["PENDING", "PAID", "PREPARING", "SHIPPED", "DELIVERED", "CANCELED"];
   const status = String(req.body.status || "");
   if (allowed.indexOf(status) < 0) return res.status(400).json({ error: "상태 값이 올바르지 않습니다." });
-  const order = await db.updateOrderStatus(req.params.id, status);
+  const order = await db.findOrderById(req.params.id);
   if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
-  res.json({ ok: true, status });
+  const fulfillment = ["PREPARING", "SHIPPED", "DELIVERED"];
+  if (fulfillment.indexOf(status) >= 0 && order.status !== "PAID" && fulfillment.indexOf(order.status) < 0) {
+    return res.status(400).json({ error: "결제 완료 전에 배송 상태로 바꿀 수 없습니다." });
+  }
+  if (status === "CANCELED") {
+    try {
+      const canceled = await payments.cancelPaidOrder(order);
+      if (!canceled) await db.updateOrderStatus(order.id, "CANCELED");
+    } catch (_err) {
+      return res.status(400).json({ error: "결제 취소가 완료되지 않았습니다." });
+    }
+    await db.writeAudit(req.user.id, "order_status", order.number + ":CANCELED", req.ip || "");
+    return res.json({ ok: true, status: "CANCELED" });
+  }
+  const saved = await db.updateOrderStatus(order.id, status);
+  await db.writeAudit(req.user.id, "order_status", order.number + ":" + status, req.ip || "");
+  res.json({ ok: true, status: saved.status });
 });
 
 app.use((req, res) => {

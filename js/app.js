@@ -173,10 +173,17 @@ function footerHTML() {
   </div>`;
 }
 
+function passwordRuleError(password) {
+  if (!password || password.length < 8 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    return "비밀번호는 8자 이상이며 영문 대문자, 소문자, 숫자, 특수문자를 각각 하나 이상 포함해야 합니다.";
+  }
+  return "";
+}
+
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({
     credentials: "include",
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" }
   }, opts || {}));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "요청에 실패했습니다.");
@@ -206,7 +213,18 @@ function showFormError(id, msg) {
 }
 
 function statusLabel(status) {
-  return { received: "접수", reviewing: "확인 중", confirmed: "안내 완료", cancelled: "취소" }[status] || status;
+  return {
+    PENDING: "결제 대기",
+    PAID: "결제 완료",
+    PREPARING: "상품 준비",
+    SHIPPED: "배송 중",
+    DELIVERED: "배송 완료",
+    CANCELED: "취소",
+    received: "접수",
+    reviewing: "확인 중",
+    confirmed: "안내 완료",
+    cancelled: "취소"
+  }[status] || status;
 }
 
 function esc(s) {
@@ -325,6 +343,24 @@ function renderCart() {
   document.querySelector("#cart-total").textContent = "예상 합계 " + won(sum);
 }
 
+function applyRegistrationGate() {
+  return fetch("/api/public-config", { credentials: "include" })
+    .then((res) => res.json())
+    .then((data) => {
+      if (!data || data.registrationOpen !== false) return true;
+      document.querySelectorAll("a").forEach((link) => {
+        const href = link.getAttribute("href") || "";
+        if (/(^|\/)signup\.html$/.test(href)) link.hidden = true;
+      });
+      const form = document.querySelector("#signup-form");
+      const note = document.querySelector("#signup-closed");
+      if (form) form.hidden = true;
+      if (note) note.hidden = false;
+      return false;
+    })
+    .catch(() => true);
+}
+
 function mountShell(page) {
   const header = document.querySelector("#site-header");
   const footer = document.querySelector("#site-footer");
@@ -333,6 +369,7 @@ function mountShell(page) {
   updateCartCount();
   renderCart();
   refreshAuth();
+  applyRegistrationGate();
   if (window.__shellBound) return;
   window.__shellBound = true;
 
@@ -688,6 +725,11 @@ function initSignup() {
   form.onsubmit = async (e) => {
     e.preventDefault();
     showFormError("#signup-error", "");
+    const rule = passwordRuleError(form.password.value);
+    if (rule) {
+      showFormError("#signup-error", rule);
+      return;
+    }
     try {
       await api("/api/signup", {
         method: "POST",
@@ -695,6 +737,7 @@ function initSignup() {
           username: form.username.value,
           name: form.name.value,
           phone: form.phone.value,
+          email: form.email.value,
           password: form.password.value
         })
       });
@@ -736,21 +779,79 @@ function initFindId() {
 
 function initFindPassword() {
   mountShell("account");
-  bindPasswordToggles();
-  const form = document.querySelector("#reset-form");
+  const form = document.querySelector("#find-password-form");
   if (!form) return;
   form.onsubmit = async (e) => {
     e.preventDefault();
+    showFormError("#find-password-error", "");
+    const result = document.querySelector("#find-password-result");
+    if (result) {
+      result.hidden = true;
+      result.textContent = "";
+    }
+    try {
+      const data = await api("/api/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email: form.email.value })
+      });
+      if (result) {
+        result.hidden = false;
+        result.textContent = data.message || "가입된 이메일이라면 재설정 링크를 보냈습니다.";
+      }
+    } catch (err) {
+      showFormError("#find-password-error", err.message);
+    }
+  };
+  const help = document.querySelector("#password-help-form");
+  if (!help) return;
+  help.onsubmit = async (e) => {
+    e.preventDefault();
+    showFormError("#password-help-error", "");
+    const result = document.querySelector("#password-help-result");
+    if (result) {
+      result.hidden = true;
+      result.textContent = "";
+    }
+    try {
+      const data = await api("/api/password-help", {
+        method: "POST",
+        body: JSON.stringify({ name: help.name.value, phone: help.phone.value })
+      });
+      if (result) {
+        result.hidden = false;
+        result.textContent = data.message || "요청을 접수했습니다.";
+      }
+    } catch (err) {
+      showFormError("#password-help-error", err.message);
+    }
+  };
+}
+
+function initResetPassword() {
+  mountShell("account");
+  const form = document.querySelector("#reset-password-form");
+  if (!form) return;
+  const token = new URLSearchParams(location.search).get("token") || "";
+  form.onsubmit = async (e) => {
+    e.preventDefault();
     showFormError("#reset-error", "");
+    if (!token) {
+      showFormError("#reset-error", "재설정 링크가 올바르지 않습니다. 비밀번호 찾기에서 다시 요청해 주세요.");
+      return;
+    }
+    if (form.password.value !== form.passwordConfirm.value) {
+      showFormError("#reset-error", "비밀번호가 서로 다릅니다.");
+      return;
+    }
+    const rule = passwordRuleError(form.password.value);
+    if (rule) {
+      showFormError("#reset-error", rule);
+      return;
+    }
     try {
       await api("/api/reset-password", {
         method: "POST",
-        body: JSON.stringify({
-          login: form.login.value,
-          name: form.name.value,
-          phone: form.phone.value,
-          password: form.password.value
-        })
+        body: JSON.stringify({ token, password: form.password.value })
       });
       toast("비밀번호를 바꿨습니다. 다시 로그인해 주세요.");
       location.href = "login.html";
@@ -758,6 +859,66 @@ function initFindPassword() {
       showFormError("#reset-error", err.message);
     }
   };
+}
+
+async function renderPasswordHelp() {
+  const box = document.querySelector("#password-help");
+  if (!box) return;
+  let data;
+  try {
+    data = await api("/api/password-help");
+  } catch (_err) {
+    return;
+  }
+  const items = data.items || [];
+  box.innerHTML = `
+    <div class="section-head" style="margin-top:32px">
+      <div>
+        <h2>이메일 없는 회원 비밀번호 요청</h2>
+        <p>전화로 본인을 확인한 뒤 새 비밀번호를 정하세요. 비밀번호는 전화로만 안내합니다.</p>
+      </div>
+    </div>
+    ${items.length ? items.map((item) => `
+      <form class="panel form" data-help-id="${esc(item.id)}" style="margin-top:12px">
+        <p><b>${esc(item.name)}</b> · ${esc(item.phone)} · ${item.site === "medical" ? "현대 의료기" : "헤리움"}</p>
+        <label>새 비밀번호</label>
+        <input name="password" type="password" required autocomplete="new-password" placeholder="대/소문자, 숫자, 특수문자 포함 8자 이상" />
+        <label>한 번 더</label>
+        <input name="confirm" type="password" required autocomplete="new-password" />
+        <p class="form-error" hidden></p>
+        <button class="btn btn-teal" type="submit" style="margin-top:12px">저장</button>
+      </form>
+    `).join("") : `<p class="empty">대기 중인 요청이 없습니다.</p>`}
+  `;
+  box.querySelectorAll("form").forEach((form) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const error = form.querySelector(".form-error");
+      const rule = passwordRuleError(form.password.value);
+      if (form.password.value !== form.confirm.value) {
+        error.hidden = false;
+        error.textContent = "비밀번호 확인이 일치하지 않습니다.";
+        return;
+      }
+      if (rule) {
+        error.hidden = false;
+        error.textContent = rule;
+        return;
+      }
+      error.hidden = true;
+      try {
+        await api("/api/password-help/" + form.dataset.helpId + "/reset", {
+          method: "POST",
+          body: JSON.stringify({ password: form.password.value, confirm: form.confirm.value })
+        });
+        toast("새 비밀번호를 저장했습니다. 회원에게 전화로만 안내하세요.");
+        renderPasswordHelp();
+      } catch (err) {
+        error.hidden = false;
+        error.textContent = err.message;
+      }
+    };
+  });
 }
 
 function initAccount() {
@@ -773,6 +934,7 @@ function initAccount() {
     bits.push(user.phone || "휴대폰 미등록");
     if (user.role === "admin") bits.push("관리자");
     document.querySelector("#account-phone").textContent = bits.join(" · ");
+    if (user.role === "admin") renderPasswordHelp();
     document.querySelector("#logout-btn").onclick = async () => {
       await api("/api/logout", { method: "POST", body: "{}" });
       location.href = "index.html";
@@ -782,16 +944,24 @@ function initAccount() {
       profile.username.value = user.username || "";
       profile.name.value = user.name || "";
       profile.phone.value = user.phone || "";
+      profile.email.value = user.email || "";
       profile.address.value = user.address || "";
       profile.onsubmit = async (e) => {
         e.preventDefault();
         showFormError("#profile-error", "");
+        const nextPw = profile.newPassword.value || "";
+        const rule = passwordRuleError(nextPw);
+        if (nextPw && rule) {
+          showFormError("#profile-error", rule);
+          return;
+        }
         try {
           const saved = await api("/api/me", {
             method: "PATCH",
             body: JSON.stringify({
               name: profile.name.value,
               phone: profile.phone.value,
+              email: profile.email.value,
               address: profile.address.value,
               currentPassword: profile.currentPassword.value,
               password: profile.newPassword.value
@@ -820,7 +990,7 @@ function initAccount() {
           ? `<div class="order-admin">
               <label>상태
                 <select data-order-status="${esc(o.id)}">
-                  ${["received", "reviewing", "confirmed", "cancelled"].map((s) =>
+                  ${["PENDING", "PAID", "PREPARING", "SHIPPED", "DELIVERED", "CANCELED"].map((s) =>
                     `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
                   ).join("")}
                 </select>
@@ -839,7 +1009,7 @@ function initAccount() {
           ${o.address ? `<p>${esc(o.address)}</p>` : ""}
           ${topics ? `<p>관심 품목: ${topics}</p>` : ""}
           ${items ? `<p>${items}</p>` : ""}
-          ${o.total ? `<p><b>예상 합계 ${won(o.total)}</b> (결제 전 접수)</p>` : ""}
+          ${o.total ? `<p><b>${won(o.total)}</b></p>` : ""}
           ${o.memo ? `<p class="muted">${esc(o.memo)}</p>` : ""}
           ${admin}
         </article>`;
@@ -899,39 +1069,92 @@ function initCheckout() {
         <div><b>${esc(p.name)}</b><div>${i.qty}개 · ${won(pay)}</div></div>
       </div>`;
     }).join("");
-    totalEl.textContent = "예상 합계 " + won(sum) + " · 결제 전 접수";
+    totalEl.textContent = "결제 금액 " + won(sum);
+    let prepared = null;
     form.onsubmit = async (e) => {
       e.preventDefault();
       showFormError("#checkout-error", "");
       try {
-        const result = await api("/api/orders", {
-          method: "POST",
-          body: JSON.stringify({
-            type: "order",
-            name: form.name.value,
-            phone: form.phone.value,
-            address: form.address.value,
-            memo: form.memo.value,
-            items
-          })
-        });
-        saveCart([]);
-        if (user) {
-          toast("주문이 접수되었습니다. " + result.order.number);
-          location.href = "account.html";
+        if (!prepared) {
+          prepared = await api("/api/payments/prepare", {
+            method: "POST",
+            body: JSON.stringify({
+              name: form.name.value,
+              phone: form.phone.value,
+              address: form.address.value,
+              memo: form.memo.value,
+              amount: sum,
+              items
+            })
+          });
+          await loadToss();
+          const widgets = TossPayments(prepared.clientKey).widgets({ customerKey: prepared.customerKey });
+          await widgets.setAmount({ currency: "KRW", value: prepared.amount });
+          document.querySelector("#payment-box").hidden = false;
+          await widgets.renderPaymentMethods({ selector: "#payment-method" });
+          await widgets.renderAgreement({ selector: "#agreement" });
+          prepared.widgets = widgets;
+          form.querySelector("button[type=submit]").textContent = "결제창 열기";
           return;
         }
-        const done = document.querySelector("#checkout-done");
-        if (done) {
-          done.hidden = false;
-          done.textContent = "주문이 접수되었습니다. 접수번호 " + result.order.number + " · 입력하신 휴대폰 번호로 연락드립니다.";
-        }
-        form.querySelector("button[type=submit]").disabled = true;
+        await prepared.widgets.requestPayment({
+          orderId: prepared.orderId,
+          orderName: prepared.orderName,
+          successUrl: prepared.successUrl,
+          failUrl: prepared.failUrl,
+          customerName: prepared.customerName,
+          customerMobilePhone: prepared.customerMobilePhone
+        });
       } catch (err) {
         showFormError("#checkout-error", err.message);
       }
     };
   });
+}
+
+function loadToss() {
+  if (window.TossPayments) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://js.tosspayments.com/v2/standard";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("결제 창을 불러오지 못했습니다."));
+    document.head.appendChild(script);
+  });
+}
+
+function initPaymentSuccess() {
+  mountShell("shop");
+  const params = new URLSearchParams(location.search);
+  const result = document.querySelector("#payment-result");
+  api("/api/payments/confirm", {
+    method: "POST",
+    body: JSON.stringify({
+      paymentKey: params.get("paymentKey") || "",
+      orderId: params.get("orderId") || "",
+      amount: Number(params.get("amount"))
+    })
+  }).then((data) => {
+    saveCart([]);
+    if (result) {
+      result.textContent = data.status === "PAID"
+        ? "결제가 확인되었습니다. 주문번호 " + (params.get("orderId") || "")
+        : "가상계좌가 발급되었습니다. 입금이 확인되면 결제가 완료됩니다.";
+    }
+  }).catch((err) => {
+    if (result) result.textContent = err.message;
+  });
+}
+
+function initPaymentFail() {
+  mountShell("shop");
+  const params = new URLSearchParams(location.search);
+  const orderId = params.get("orderId") || "";
+  if (!orderId) return;
+  api("/api/payments/fail", {
+    method: "POST",
+    body: JSON.stringify({ orderId })
+  }).catch(() => {});
 }
 
 function initAbout() {
@@ -972,6 +1195,7 @@ function initSitemap() {
       <ul class="sitemap-list">${pageList}</ul>
     </article>
     ${groupCols}`;
+  applyRegistrationGate();
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initAccount, initCheckout };
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initCheckout, initPaymentSuccess, initPaymentFail };

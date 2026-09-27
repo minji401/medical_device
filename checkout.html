@@ -12,8 +12,8 @@
   <section class="page-hero">
     <div class="wrap">
       <div class="crumbs">홈 · 주문</div>
-      <h1>주문 접수</h1>
-      <p>회원 가입 없이 주문할 수 있습니다. 연락은 휴대폰 번호로 드립니다.</p>
+      <h1>주문 결제</h1>
+      <p>결제 금액은 서버가 상품 가격으로 다시 계산합니다. 결제창은 토스페이먼츠에서 열립니다.</p>
     </div>
   </section>
   <section class="section" style="padding-top:0">
@@ -25,8 +25,8 @@
       </div>
       <form class="panel form" id="checkout-form">
         <h2>배송·연락 정보</h2>
-        <label>이름 (선택)</label>
-        <input name="name" value="" autocomplete="name" />
+        <label>이름</label>
+        <input name="name" required value="" autocomplete="name" />
         <label>휴대폰 번호</label>
         <input name="phone" required value="" autocomplete="tel" />
         <label>배송·설치 주소</label>
@@ -34,7 +34,11 @@
         <label>요청 사항</label>
         <textarea name="memo" placeholder="방문 시간, 설치 장소, 등급 여부를 적어 주세요."></textarea>
         <p class="form-error" id="checkout-error" hidden></p>
-        <button class="btn btn-teal btn-lg" type="submit" style="width:100%;margin-top:18px">주문 접수하기</button>
+        <div id="payment-box" hidden>
+          <div id="payment-method"></div>
+          <div id="agreement"></div>
+        </div>
+        <button class="btn btn-teal btn-lg" type="submit" style="width:100%;margin-top:18px">결제하기</button>
         <p id="checkout-done" class="auth-result" hidden></p>
       </form>
     </div>

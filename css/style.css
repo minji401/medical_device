@@ -952,6 +952,12 @@ body:has(.auth-page) .mobile-nav { display: none; }
   font-size: 14px;
 }
 .auth-links a:hover { color: var(--gold); }
+.auth-help {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
 .auth-social {
   display: grid;
   gap: 10px;

@@ -1,5 +1,7 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const { encryptText, decryptText } = require("./pii");
 
 const DATA_DIR = path.join(__dirname, "data");
 const SQLITE_FILE = path.join(DATA_DIR, "hyundai.db");
@@ -59,6 +61,46 @@ async function exec(sql, params) {
   return [];
 }
 
+async function withTransaction(work) {
+  if (driver === "pg") {
+    const client = await pool.connect();
+    const txExec = async (sql, params) => {
+      const result = await client.query(toPg(sql), params || []);
+      return { rows: result.rows || [], changes: result.rowCount || 0 };
+    };
+    try {
+      await client.query("BEGIN");
+      const out = await work(txExec);
+      await client.query("COMMIT");
+      return out;
+    } catch (err) {
+      try { await client.query("ROLLBACK"); } catch (_e) {}
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+  sqlite.exec("BEGIN IMMEDIATE");
+  const txExec = async (sql, params) => {
+    const values = params || [];
+    const trimmed = String(sql).trim();
+    if (/^select/i.test(trimmed)) {
+      const rows = sqlite.prepare(sql).all(...values);
+      return { rows, changes: rows.length };
+    }
+    const info = sqlite.prepare(sql).run(...values);
+    return { rows: [], changes: info.changes || 0 };
+  };
+  try {
+    const out = await work(txExec);
+    sqlite.exec("COMMIT");
+    return out;
+  } catch (err) {
+    try { sqlite.exec("ROLLBACK"); } catch (_e) {}
+    throw err;
+  }
+}
+
 async function runScript(script) {
   const parts = script.split(";").map((s) => s.trim()).filter(Boolean);
   for (const part of parts) await exec(part);
@@ -89,6 +131,8 @@ function mapUser(row) {
     heriumNote: row.herium_note || "",
     guardianName: row.guardian_name || "",
     address: row.address || "",
+    loginFailures: Number(row.login_failures) || 0,
+    loginLockedUntil: row.login_locked_until || "",
     kakaoId: row.kakao_id || "",
     naverId: row.naver_id || "",
     googleId: row.google_id || "",
@@ -103,16 +147,25 @@ function mapOrder(row) {
     number: row.number,
     userId: row.user_id,
     type: row.type,
-    name: row.name,
-    phone: row.phone,
-    address: row.address || "",
-    memo: row.memo || "",
+    name: decryptText(row.name),
+    phone: decryptText(row.phone),
+    address: decryptText(row.address || ""),
+    memo: decryptText(row.memo || ""),
     topics: JSON.parse(row.topics || "[]"),
     items: JSON.parse(row.items || "[]"),
     total: Number(row.total) || 0,
-    status: row.status,
+    status: normalizeStatus(row.status),
     createdAt: row.created_at
   };
+}
+
+function normalizeStatus(status) {
+  return {
+    received: "PENDING",
+    reviewing: "PREPARING",
+    confirmed: "PREPARING",
+    cancelled: "CANCELED"
+  }[status] || status || "PENDING";
 }
 
 async function migrateJson() {
@@ -170,6 +223,81 @@ async function init() {
   }
   await migrateJson();
   await ensureColumns();
+  await exec(
+    `CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL
+    )`
+  );
+  await exec(
+    `CREATE TABLE IF NOT EXISTS payments (
+      id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      toss_order_id TEXT NOT NULL UNIQUE,
+      payment_key TEXT,
+      amount INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      method TEXT,
+      stock_held INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      approved_at TEXT
+    )`
+  );
+  await exec(
+    `CREATE TABLE IF NOT EXISTS product_stock (
+      product_id TEXT PRIMARY KEY,
+      qty INTEGER NOT NULL
+    )`
+  );
+  await exec(
+    `CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      actor TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    )`
+  );
+  await exec(
+    `CREATE TABLE IF NOT EXISTS password_help_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name_enc TEXT NOT NULL,
+      phone_enc TEXT NOT NULL,
+      site TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      closed_at TEXT
+    )`
+  );
+}
+
+function sealOrder(order) {
+  return {
+    name: encryptText(order.name),
+    phone: encryptText(order.phone),
+    address: encryptText(order.address || ""),
+    memo: encryptText(order.memo || "")
+  };
+}
+
+async function writeAudit(actor, action, target, ip) {
+  await exec(
+    "INSERT INTO audit_logs (id, actor, action, target, ip, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    [
+      "aud_" + crypto.randomUUID(),
+      String(actor || "").slice(0, 80),
+      String(action || "").slice(0, 80),
+      String(target || "").slice(0, 120),
+      String(ip || "").slice(0, 64),
+      new Date().toISOString()
+    ]
+  );
 }
 
 async function findUserById(id) {
@@ -188,7 +316,9 @@ async function ensureColumns() {
     ["herium_relation", "TEXT"],
     ["herium_note", "TEXT"],
     ["guardian_name", "TEXT"],
-    ["address", "TEXT"]
+    ["address", "TEXT"],
+    ["login_failures", "INTEGER NOT NULL DEFAULT 0"],
+    ["login_locked_until", "TEXT"]
   ];
   for (const [name, type] of cols) {
     try {
@@ -330,7 +460,7 @@ async function findUserBySocial(provider, socialId) {
 async function findUserByEmail(email) {
   const value = String(email || "").trim();
   if (!value) return null;
-  const rows = await exec("SELECT * FROM users WHERE email = ? LIMIT 1", [value]);
+  const rows = await exec("SELECT * FROM users WHERE lower(email) = lower(?) LIMIT 1", [value]);
   return mapUser(rows[0]);
 }
 
@@ -349,6 +479,9 @@ async function updateBuyerProfile(id, fields) {
     "UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?",
     [fields.name, fields.phone, fields.address || "", id]
   );
+  if (Object.prototype.hasOwnProperty.call(fields, "email")) {
+    await exec("UPDATE users SET email = ? WHERE id = ?", [fields.email || null, id]);
+  }
 }
 
 async function setGuardianName(id, guardianName) {
@@ -387,7 +520,69 @@ async function createUser(user) {
   return user;
 }
 
+async function clearLoginFailure(id) {
+  await exec("UPDATE users SET login_failures = 0, login_locked_until = NULL WHERE id = ?", [id]);
+}
+
+function lockMessage(user) {
+  if (!user || !user.loginLockedUntil) return "";
+  const left = new Date(user.loginLockedUntil).getTime() - Date.now();
+  if (!left || left <= 0) return "";
+  const minutes = Math.max(1, Math.ceil(left / 60000));
+  return "비밀번호를 5회 연속으로 틀려 로그인이 잠겼습니다. 약 " + minutes + "분 뒤에 다시 시도해 주세요.";
+}
+
+async function noteLoginFailure(id, currentCount) {
+  const next = (Number(currentCount) || 0) + 1;
+  if (next >= 5) {
+    const until = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    await exec("UPDATE users SET login_failures = ?, login_locked_until = ? WHERE id = ?", [next, until, id]);
+    return { locked: true, until };
+  }
+  await exec("UPDATE users SET login_failures = ? WHERE id = ?", [next, id]);
+  return { locked: false };
+}
+
+async function issueResetToken(userId) {
+  const raw = crypto.randomBytes(32).toString("base64url");
+  const digest = crypto.createHash("sha256").update(raw).digest("hex");
+  const now = new Date();
+  const expires = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+  const nowS = now.toISOString();
+  await exec("UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL", [nowS, userId]);
+  await exec(
+    "INSERT INTO password_resets (id, user_id, token_hash, expires_at, used_at, created_at) VALUES (?, ?, ?, ?, NULL, ?)",
+    ["pr_" + crypto.randomUUID().replace(/-/g, ""), userId, digest, expires, nowS]
+  );
+  return raw;
+}
+
+async function takeResetToken(raw) {
+  if (!raw) return null;
+  const digest = crypto.createHash("sha256").update(String(raw)).digest("hex");
+  const rows = await exec(
+    "SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token_hash = ? LIMIT 1",
+    [digest]
+  );
+  const row = rows[0];
+  if (!row || row.used_at) return null;
+  if (new Date(row.expires_at).getTime() <= Date.now()) return null;
+  const nowS = new Date().toISOString();
+  if (driver === "pg") {
+    const updated = await pool.query(
+      "UPDATE password_resets SET used_at = $1 WHERE id = $2 AND used_at IS NULL RETURNING id",
+      [nowS, row.id]
+    );
+    if (!updated.rows.length) return null;
+  } else {
+    const info = sqlite.prepare("UPDATE password_resets SET used_at = ? WHERE id = ? AND used_at IS NULL").run(nowS, row.id);
+    if (!info.changes) return null;
+  }
+  return row.user_id;
+}
+
 async function createOrder(order) {
+  const sealed = sealOrder(order);
   await exec(
     `INSERT INTO orders (id, number, user_id, type, name, phone, address, memo, topics, items, total, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -396,10 +591,10 @@ async function createOrder(order) {
       order.number,
       order.userId || null,
       order.type,
-      order.name,
-      order.phone,
-      order.address || "",
-      order.memo || "",
+      sealed.name,
+      sealed.phone,
+      sealed.address,
+      sealed.memo,
       JSON.stringify(order.topics || []),
       JSON.stringify(order.items || []),
       order.total || 0,
@@ -419,11 +614,178 @@ async function listOrders(opts) {
   return rows.map(mapOrder);
 }
 
+async function findOrderById(id) {
+  const rows = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
+  return mapOrder(rows[0]);
+}
+
+async function findOrderByNumber(number) {
+  const rows = await exec("SELECT * FROM orders WHERE number = ? LIMIT 1", [number]);
+  return mapOrder(rows[0]);
+}
+
+function mapPayment(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    tossOrderId: row.toss_order_id,
+    paymentKey: row.payment_key || "",
+    amount: Number(row.amount) || 0,
+    status: row.status,
+    method: row.method || "",
+    stockHeld: Number(row.stock_held) === 1,
+    createdAt: row.created_at,
+    approvedAt: row.approved_at || ""
+  };
+}
+
+async function findPaymentByTossOrderId(tossOrderId) {
+  const rows = await exec("SELECT * FROM payments WHERE toss_order_id = ? LIMIT 1", [tossOrderId]);
+  return mapPayment(rows[0]);
+}
+
+async function createPendingCheckout(order, items) {
+  return withTransaction(async (tx) => {
+    let held = false;
+    for (const item of items) {
+      const found = await tx("SELECT qty FROM product_stock WHERE product_id = ?", [item.id]);
+      if (!found.rows.length) continue;
+      const updated = await tx(
+        "UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND qty >= ?",
+        [item.qty, item.id, item.qty]
+      );
+      if (!updated.changes) {
+        const err = new Error("재고가 부족한 상품이 있습니다.");
+        err.status = 409;
+        throw err;
+      }
+      held = true;
+    }
+    const sealed = sealOrder(order);
+    await tx(
+      `INSERT INTO orders (id, number, user_id, type, name, phone, address, memo, topics, items, total, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        order.id,
+        order.number,
+        order.userId || null,
+        order.type,
+        sealed.name,
+        sealed.phone,
+        sealed.address,
+        sealed.memo,
+        JSON.stringify(order.topics || []),
+        JSON.stringify(order.items || []),
+        order.total || 0,
+        "PENDING",
+        order.createdAt
+      ]
+    );
+    await tx(
+      `INSERT INTO payments (id, order_id, toss_order_id, payment_key, amount, status, method, stock_held, created_at, approved_at)
+       VALUES (?, ?, ?, NULL, ?, 'PENDING', NULL, ?, ?, NULL)`,
+      ["pay_" + crypto.randomUUID(), order.id, order.number, order.total || 0, held ? 1 : 0, order.createdAt]
+    );
+    return { stockHeld: held };
+  });
+}
+
+async function applyPaymentResult(tossOrderId, next) {
+  return withTransaction(async (tx) => {
+    const orderRows = await tx("SELECT * FROM orders WHERE number = ? LIMIT 1", [tossOrderId]);
+    const payRows = await tx("SELECT * FROM payments WHERE toss_order_id = ? LIMIT 1", [tossOrderId]);
+    if (!orderRows.rows[0] || !payRows.rows[0]) return null;
+    const order = mapOrder(orderRows.rows[0]);
+    const payment = mapPayment(payRows.rows[0]);
+    const fulfillment = ["PREPARING", "SHIPPED", "DELIVERED"];
+    let orderStatus = next.orderStatus;
+    if (fulfillment.indexOf(order.status) >= 0 && orderStatus === "PAID") orderStatus = order.status;
+    if (next.releaseStock && Number(payRows.rows[0].stock_held) === 1) {
+      for (const item of order.items || []) {
+        const found = await tx("SELECT qty FROM product_stock WHERE product_id = ?", [item.id]);
+        if (!found.rows.length) continue;
+        await tx("UPDATE product_stock SET qty = qty + ? WHERE product_id = ?", [item.qty, item.id]);
+      }
+      await tx("UPDATE payments SET stock_held = 0 WHERE id = ?", [payment.id]);
+    }
+    await tx("UPDATE orders SET status = ? WHERE id = ?", [orderStatus, order.id]);
+    await tx(
+      "UPDATE payments SET status = ?, payment_key = COALESCE(?, payment_key), method = COALESCE(?, method), approved_at = COALESCE(?, approved_at) WHERE id = ?",
+      [next.paymentStatus, next.paymentKey || null, next.method || null, next.approvedAt || null, payment.id]
+    );
+    return { id: order.id, status: orderStatus, amount: payment.amount };
+  });
+}
+
 async function updateOrderStatus(id, status) {
   const rows = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
   if (!rows[0]) return null;
   await exec("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
   return mapOrder(Object.assign({}, rows[0], { status: status }));
+}
+
+async function findNoEmailMember(name, phone) {
+  const user = await findUserByPhone(phone);
+  if (!user || String(user.email || "").trim()) return null;
+  const wanted = String(name || "").replace(/\s/g, "");
+  const names = [user.name, user.guardianName]
+    .map((value) => String(value || "").replace(/\s/g, ""))
+    .filter(Boolean);
+  if (names.indexOf(wanted) < 0) return null;
+  return user;
+}
+
+async function openPasswordHelp(userId, name, phone, site) {
+  const existing = await exec(
+    "SELECT id FROM password_help_requests WHERE user_id = ? AND status = 'open' LIMIT 1",
+    [userId]
+  );
+  if (existing[0]) return;
+  await exec(
+    `INSERT INTO password_help_requests (id, user_id, name_enc, phone_enc, site, status, created_at, closed_at)
+     VALUES (?, ?, ?, ?, ?, 'open', ?, NULL)`,
+    [
+      "ph_" + crypto.randomUUID().replace(/-/g, ""),
+      userId,
+      encryptText(name),
+      encryptText(phone),
+      site,
+      new Date().toISOString()
+    ]
+  );
+}
+
+function mapHelp(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: decryptText(row.name_enc),
+    phone: decryptText(row.phone_enc),
+    site: row.site,
+    createdAt: row.created_at
+  };
+}
+
+async function listPasswordHelp() {
+  const rows = await exec("SELECT * FROM password_help_requests WHERE status = 'open' ORDER BY created_at DESC");
+  return rows.map(mapHelp);
+}
+
+async function findOpenPasswordHelp(id) {
+  const rows = await exec(
+    "SELECT * FROM password_help_requests WHERE id = ? AND status = 'open' LIMIT 1",
+    [id]
+  );
+  return mapHelp(rows[0]);
+}
+
+async function closePasswordHelp(id) {
+  await exec(
+    "UPDATE password_help_requests SET status = 'done', closed_at = ? WHERE id = ? AND status = 'open'",
+    [new Date().toISOString(), id]
+  );
 }
 
 module.exports = {
@@ -442,8 +804,24 @@ module.exports = {
   updatePassword,
   updateBuyerProfile,
   setGuardianName,
+  clearLoginFailure,
+  lockMessage,
+  noteLoginFailure,
+  issueResetToken,
+  takeResetToken,
   createUser,
   createOrder,
+  findOrderByNumber,
+  findOrderById,
+  findPaymentByTossOrderId,
+  createPendingCheckout,
+  applyPaymentResult,
   listOrders,
-  updateOrderStatus
+  updateOrderStatus,
+  writeAudit,
+  findNoEmailMember,
+  openPasswordHelp,
+  listPasswordHelp,
+  findOpenPasswordHelp,
+  closePasswordHelp
 };
