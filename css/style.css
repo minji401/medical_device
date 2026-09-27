@@ -209,7 +209,7 @@ ul { list-style: none; }
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: url("https://images.unsplash.com/photo-1543333995-a78aea2eee50?auto=format&fit=crop&w=1800&q=80") 22% center / cover no-repeat;
+  background: url("hero.jpg") 22% center / cover no-repeat;
   transform: scaleX(-1);
   pointer-events: none;
 }
@@ -1094,7 +1094,7 @@ body:has(.auth-page) .mobile-nav { display: none; }
     background: linear-gradient(180deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.5) 52%, rgba(255,255,255,.14) 68%, transparent 76%);
   }
   .hero::before {
-    background-image: url("https://images.unsplash.com/photo-1543333995-a78aea2eee50?auto=format&fit=crop&w=1400&q=80");
+    background-image: url("hero.jpg");
     background-position: 18% center;
   }
   .hero-inner { padding: 40px 20px 28px; }
