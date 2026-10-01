@@ -147,6 +147,7 @@ function footerHTML() {
     <div class="legal">
       상호 현대의료기 | 대표 강시중 | 사업자등록번호 123-45-67890 | 대표전화 054-334-9986<br>
       헤리움 케어센터와 같은 자리에서 복지용구·일반의료기·장애인 용품을 안내합니다. 상품 가격과 급여 기준은 공단 고시에 따라 달라질 수 있습니다.
+      <p class="legal-links"><a href="privacy.html">개인정보처리방침</a><a href="terms.html">이용약관</a></p>
     </div>
   </div></footer>
   <div class="float-cs">
@@ -730,6 +731,10 @@ function initSignup() {
       showFormError("#signup-error", rule);
       return;
     }
+    if (!form.agree.checked) {
+      showFormError("#signup-error", "이용약관 및 개인정보처리방침에 동의해 주세요.");
+      return;
+    }
     try {
       await api("/api/signup", {
         method: "POST",
@@ -1175,7 +1180,9 @@ function initSitemap() {
     ["signup.html", "회원가입"],
     ["find-id.html", "아이디 찾기"],
     ["find-password.html", "비밀번호 찾기"],
-    ["account.html", "마이페이지 · 주문조회"]
+    ["account.html", "마이페이지 · 주문조회"],
+    ["privacy.html", "개인정보처리방침"],
+    ["terms.html", "이용약관"]
   ];
   const pageList = pages.map(([href, label]) => `<li><a href="${href}">${esc(label)}</a></li>`).join("");
   const groupCols = GROUPS.map((g) => {

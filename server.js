@@ -36,7 +36,7 @@ app.use(guard.requireFetchHeader);
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "find-id", "find-password", "reset-password", "account", "checkout", "payment-success", "payment-fail", "sitemap"
+  "login", "signup", "find-id", "find-password", "reset-password", "account", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms"
 ];
 
 app.use("/css", express.static(path.join(ROOT, "css")));
@@ -77,6 +77,8 @@ app.get("/sitemap.xml", (_req, res) => {
     xmlUrl(SITE + "/guide.html", "monthly", "0.8"),
     xmlUrl(SITE + "/consult.html", "monthly", "0.8"),
     xmlUrl(SITE + "/about.html", "monthly", "0.7"),
+    xmlUrl(SITE + "/privacy.html", "yearly", "0.3"),
+    xmlUrl(SITE + "/terms.html", "yearly", "0.3"),
     xmlUrl(SITE + "/sitemap.html", "monthly", "0.4"),
     xmlUrl(SITE + "/login.html", "yearly", "0.3"),
     xmlUrl(SITE + "/signup.html", "yearly", "0.3"),

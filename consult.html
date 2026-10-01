@@ -44,9 +44,10 @@
         </div>
         <label>문의 내용</label>
         <textarea id="message" name="message" placeholder="어르신의 거동 상태, 배송 지역을 알려 주세요."></textarea>
-        <label class="check" style="margin:14px 0">
-          <input type="checkbox" name="agree" /> 개인정보 수집 및 이용에 동의합니다. (상담 목적, 문의 처리 후 파기)
-        </label>
+        <div class="check check-line" style="margin:14px 0">
+          <input id="consult-agree" type="checkbox" name="agree" />
+          <span><a href="privacy.html">개인정보처리방침</a>에 따른 개인정보 수집 및 이용에 동의합니다. <a href="terms.html">이용약관</a>을 확인했습니다.</span>
+        </div>
         <button class="btn btn-teal btn-lg" type="submit">상담 신청하기</button>
       </form>
       <div class="panel">
