@@ -89,27 +89,28 @@ function xmlUrl(loc, changefreq, priority) {
 }
 
 app.get("/robots.txt", (_req, res) => {
-  res.type("text/plain").send(
-    "User-agent: Yeti\nAllow: /\n\nUser-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /account\nDisallow: /checkout\nSitemap: " + SITE + "/sitemap.xml\n"
+  res.type("text/plain; charset=utf-8").send(
+    [
+      "User-agent: *",
+      "Allow: /",
+      "Disallow: /admin/",
+      "Disallow: /admin.html",
+      "Disallow: /api/",
+      "Sitemap: https://hyundaimedi.com/sitemap.xml",
+      ""
+    ].join("\n")
   );
 });
 
 app.get("/sitemap.xml", (_req, res) => {
   const urls = [
     xmlUrl(SITE + "/", "weekly", "1.0"),
-    xmlUrl(SITE + "/shop.html", "weekly", "0.9"),
-    xmlUrl(SITE + "/guide.html", "monthly", "0.8"),
-    xmlUrl(SITE + "/consult.html", "monthly", "0.8"),
-    xmlUrl(SITE + "/about.html", "monthly", "0.7"),
-    xmlUrl(SITE + "/privacy.html", "yearly", "0.3"),
-    xmlUrl(SITE + "/terms.html", "yearly", "0.3"),
-    xmlUrl(SITE + "/sitemap.html", "monthly", "0.4"),
-    xmlUrl(SITE + "/login.html", "yearly", "0.3"),
-    xmlUrl(SITE + "/signup.html", "yearly", "0.3"),
-    xmlUrl(SITE + "/find-id.html", "yearly", "0.2"),
-    xmlUrl(SITE + "/find-password.html", "yearly", "0.2"),
-    xmlUrl(SITE + "/find-id.html", "yearly", "0.2"),
-    xmlUrl(SITE + "/find-password.html", "yearly", "0.2")
+    xmlUrl(SITE + "/shop.html", "weekly", "1.0"),
+    xmlUrl(SITE + "/consult.html", "weekly", "1.0"),
+    xmlUrl(SITE + "/about.html", "weekly", "1.0"),
+    xmlUrl(SITE + "/guide.html", "weekly", "1.0"),
+    xmlUrl(SITE + "/privacy.html", "weekly", "1.0"),
+    xmlUrl(SITE + "/terms.html", "weekly", "1.0")
   ];
   (catalog.GROUPS || []).forEach((g) => {
     urls.push(xmlUrl(SITE + "/shop.html?group=" + encodeURIComponent(g.id), "weekly", "0.8"));
