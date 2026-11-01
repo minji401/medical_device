@@ -3,17 +3,41 @@ const path = require("path");
 const crypto = require("crypto");
 const vm = require("vm");
 const express = require("express");
+
+(function loadDotEnv() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+})();
+
 const db = require("./server/db");
 const oauth = require("./server/oauth");
 const security = require("./server/security");
 const payments = require("./server/payments");
 const guard = require("./server/guard");
 const { cleanText } = require("./server/pii");
+const passwords = require("./server/passwords");
+const productStore = require("./server/products");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
 const SECRET = process.env.SESSION_SECRET || (IS_PROD ? "" : "hyundai-medical-dev-secret");
+const JWT_SECRET = process.env.JWT_SECRET || SECRET;
 const COOKIE = "hm_session";
 if (IS_PROD && !SECRET) {
   console.error("SESSION_SECRET이 없습니다. 배포 환경변수에 넣어 주세요.");
@@ -36,7 +60,7 @@ app.use(guard.requireFetchHeader);
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "find-id", "find-password", "reset-password", "account", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms"
+  "login", "signup", "find-id", "find-password", "reset-password", "account", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms", "admin"
 ];
 
 app.use("/css", express.static(path.join(ROOT, "css")));
@@ -119,9 +143,7 @@ function validPhone(phone) {
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 
 function hashPassword(password) {
-  const saltHex = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.scryptSync(password, saltHex, 64, SCRYPT);
-  return saltHex + ":" + hash.toString("hex");
+  return passwords.hashPassword(password);
 }
 
 function verifyDjangoPassword(password, encoded) {
@@ -142,19 +164,34 @@ function verifyDjangoPassword(password, encoded) {
 }
 
 function verifyPassword(password, stored) {
-  const raw = String(stored || "");
-  const cut = raw.indexOf(":");
-  if (cut < 1) return false;
-  const saltHex = raw.slice(0, cut);
-  const hashHex = raw.slice(cut + 1);
-  if (!saltHex || !hashHex) return false;
+  return passwords.verifyPassword(password, stored);
+}
+
+function issueAccessToken(user) {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    sub: user.id,
+    role: user.role || "user",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60
+  })).toString("base64url");
+  const sig = crypto.createHmac("sha256", JWT_SECRET).update(header + "." + payload).digest("base64url");
+  return header + "." + payload + "." + sig;
+}
+
+function readAccessToken(token) {
+  if (!token || token.split(".").length !== 3) return null;
+  const [header, payload, sig] = token.split(".");
+  const expect = crypto.createHmac("sha256", JWT_SECRET).update(header + "." + payload).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
-    const actual = crypto.scryptSync(password, saltHex, 64, SCRYPT);
-    const expected = Buffer.from(hashHex, "hex");
-    if (actual.length !== expected.length) return false;
-    return crypto.timingSafeEqual(actual, expected);
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!data.exp || data.exp < Math.floor(Date.now() / 1000)) return null;
+    return data;
   } catch (_e) {
-    return false;
+    return null;
   }
 }
 
@@ -299,9 +336,19 @@ async function upsertSocialUser(provider, profile) {
 }
 
 async function currentUser(req) {
+  const header = String(req.headers.authorization || "");
+  if (header.toLowerCase().startsWith("bearer ")) {
+    const data = readAccessToken(header.slice(7).trim());
+    if (data && data.sub) {
+      const user = await db.findUserById(data.sub);
+      if (user && !user.withdrawnAt) return user;
+    }
+  }
   const payload = unsign(parseCookies(req)[COOKIE]);
   if (!payload) return null;
-  return db.findUserById(payload.uid);
+  const user = await db.findUserById(payload.uid);
+  if (user && user.withdrawnAt) return null;
+  return user;
 }
 
 async function requireUser(req, res, next) {
@@ -371,6 +418,9 @@ app.post("/api/signup", async (req, res) => {
   const phone = normalizePhone(req.body.phone);
   const email = String(req.body.email || "").trim();
   const password = String(req.body.password || "");
+  const age14 = req.body.age14 === true || req.body.age14 === "true" || req.body.age14 === "on" || req.body.age14 === 1;
+  const marketing = req.body.marketing === true || req.body.marketing === "true" || req.body.marketing === "on";
+  if (!age14) return res.status(400).json({ error: "만 14세 이상만 가입할 수 있습니다." });
   if (!validUsername(username)) return res.status(400).json({ error: "아이디는 4~20자의 영문·숫자·한글만 가능합니다." });
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
@@ -399,11 +449,13 @@ app.post("/api/signup", async (req, res) => {
     heriumLinked: false,
     heriumRelation: "",
     heriumNote: "herium_username=" + username,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    age14: true,
+    marketing
   };
   await db.createUser(user);
   setSession(res, user.id);
-  res.json({ user: publicUser(user) });
+  res.json({ user: publicUser(user), token: issueAccessToken(user) });
 });
 
 async function linkHeriumLogin(login, password, sharedUser) {
@@ -467,10 +519,12 @@ app.post("/api/login", async (req, res) => {
       user.loginLockedUntil = "";
     }
   }
+  if (user && user.withdrawnAt) return res.status(403).json({ error: "탈퇴 처리된 계정입니다." });
   if (user && verifyPassword(password, user.passwordHash)) {
+    if (passwords.needsRehash(user.passwordHash)) await db.updatePassword(user.id, hashPassword(password));
     await db.clearLoginFailure(user.id);
     setSession(res, user.id);
-    return res.json({ user: publicUser(user) });
+    return res.json({ user: publicUser(user), token: issueAccessToken(user) });
   }
   const linked = await linkHeriumLogin(login, password, user);
   if (!linked) {
@@ -482,7 +536,7 @@ app.post("/api/login", async (req, res) => {
   }
   await db.clearLoginFailure(linked.id);
   setSession(res, linked.id);
-  res.json({ user: publicUser(linked) });
+  res.json({ user: publicUser(linked), token: issueAccessToken(linked) });
 });
 
 app.post("/api/find-id", async (req, res) => {
@@ -662,16 +716,27 @@ app.post("/api/logout", (_req, res) => {
 });
 
 function unitPrice(product) {
+  if (product.salePrice) return product.salePrice;
   return catalog.isWelfare(product) ? catalog.copay(product.price) : product.price;
 }
 
-function buildItems(rawItems) {
+async function buildItems(rawItems) {
   const items = [];
   let total = 0;
-  (rawItems || []).forEach((row) => {
-    const product = catalog.productById(row.id);
+  for (const row of rawItems || []) {
+    const product = await productStore.one(catalog, row.id);
     const qty = Math.max(1, Math.min(20, Number(row.qty) || 1));
-    if (!product) return;
+    if (!product || product.isActive === false) continue;
+    if (Number(product.stock) === 0) {
+      const err = new Error(product.name + "은(는) 품절입니다.");
+      err.status = 409;
+      throw err;
+    }
+    if (Number(product.stock) > 0 && qty > Number(product.stock)) {
+      const err = new Error(product.name + " 재고가 부족합니다.");
+      err.status = 409;
+      throw err;
+    }
     const unit = unitPrice(product);
     const line = unit * qty;
     total += line;
@@ -681,10 +746,11 @@ function buildItems(rawItems) {
       qty,
       unit,
       total: line,
+      hygiene: Boolean(product.isHygiene),
       group: catalog.productGroup(product),
       mode: product.mode
     });
-  });
+  }
   return { items, total };
 }
 
@@ -721,7 +787,12 @@ app.post("/api/orders", async (req, res) => {
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
   if (type === "order" && address.length < 5) return res.status(400).json({ error: "배송·설치 주소를 입력해 주세요." });
 
-  const built = buildItems(req.body.items);
+  let built;
+  try {
+    built = await buildItems(req.body.items);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || "주문할 상품이 없습니다." });
+  }
   if (type === "order" && !built.items.length) return res.status(400).json({ error: "주문할 상품이 없습니다." });
 
   const order = {
@@ -785,9 +856,80 @@ app.patch("/api/orders/:id", requireUser, async (req, res) => {
     await db.writeAudit(req.user.id, "order_status", order.number + ":CANCELED", req.ip || "");
     return res.json({ ok: true, status: "CANCELED" });
   }
-  const saved = await db.updateOrderStatus(order.id, status);
+  const tracking = String(req.body.tracking_number || "").trim();
+  const saved = await db.updateOrderStatus(order.id, status, { tracking_number: tracking });
   await db.writeAudit(req.user.id, "order_status", order.number + ":" + status, req.ip || "");
-  res.json({ ok: true, status: saved.status });
+  res.json({ ok: true, status: saved.status, tracking_number: tracking || "" });
+});
+
+app.post("/api/me/withdraw", requireUser, async (req, res) => {
+  const nextHash = hashPassword(crypto.randomBytes(24).toString("hex"));
+  await db.withdrawUser(Object.assign({}, req.user, { passwordHash: nextHash }));
+  clearSession(res);
+  res.json({ ok: true, message: "탈퇴가 완료되었습니다. 주문·결제 기록은 관계 법령에 따라 보관됩니다." });
+});
+
+app.get("/api/products", async (_req, res) => {
+  res.json({ products: await productStore.all(catalog) });
+});
+
+app.get("/api/products/:id", async (req, res) => {
+  const product = await productStore.one(catalog, req.params.id);
+  if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
+  res.json({ product });
+});
+
+async function requireAdmin(req, res, next) {
+  const user = await currentUser(req);
+  if (!user) return res.status(401).json({ error: "로그인이 필요합니다." });
+  if (user.role !== "admin") return res.status(403).json({ error: "관리자만 사용할 수 있습니다." });
+  req.user = user;
+  next();
+}
+
+app.post("/api/admin/products", requireAdmin, async (req, res) => {
+  if (!String(req.body.name || "").trim() || !Number(req.body.price)) {
+    return res.status(400).json({ error: "상품명과 가격을 입력해 주세요." });
+  }
+  const saved = await productStore.save(req.body);
+  res.json({ product: saved });
+});
+
+app.patch("/api/admin/products/:id", requireAdmin, async (req, res) => {
+  req.body.id = req.params.id;
+  const saved = await productStore.save(req.body);
+  res.json({ product: saved });
+});
+
+app.get("/api/admin/products", requireAdmin, async (_req, res) => {
+  const products = await productStore.all(catalog);
+  res.json({
+    products,
+    lowStock: products.filter((p) => Number(p.stock) <= 10)
+  });
+});
+
+app.get("/api/company", async (_req, res) => {
+  res.json({ company: await db.companyContent() });
+});
+
+app.get("/api/admin/company", requireAdmin, async (_req, res) => {
+  res.json({ company: await db.companyContent() });
+});
+
+app.post("/api/admin/company", requireAdmin, async (req, res) => {
+  await db.setCompanyContent(req.body || {});
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/members", requireAdmin, async (_req, res) => {
+  const orders = await db.listOrders({ all: true });
+  const users = {};
+  orders.forEach((o) => {
+    if (!o.userId) return;
+    users[o.userId] = (users[o.userId] || 0) + (Number(o.total) || 0);
+  });
+  res.json({ totals: users });
 });
 
 app.use((req, res) => {
@@ -795,11 +937,29 @@ app.use((req, res) => {
   res.status(404).sendFile(path.join(ROOT, "index.html"));
 });
 
-db.init().then(() => {
-  app.listen(PORT, () => {
-    console.log("현대 의료기 서버 http://localhost:" + PORT);
-  });
-}).catch((err) => {
-  console.error("DB 시작 실패:", err);
-  process.exit(1);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function startDatabase() {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      await db.init();
+      await productStore.seed(catalog);
+      console.log("DB 준비 완료");
+      return;
+    } catch (err) {
+      lastError = err;
+      const msg = String((err && err.message) || err).replace(/postgresql:\/\/\S+/gi, "postgresql://***");
+      console.error("DB 시작 재시도 " + attempt + "/8:", msg);
+      await sleep(Math.min(20000, 2000 * attempt));
+    }
+  }
+  console.error("DB 시작 실패. 페이지는 열고 API는 잠시 후 다시 시도합니다.", lastError && lastError.message);
+}
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("현대 의료기 서버 0.0.0.0:" + PORT);
 });
+startDatabase();

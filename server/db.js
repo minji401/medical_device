@@ -133,6 +133,9 @@ function mapUser(row) {
     address: row.address || "",
     loginFailures: Number(row.login_failures) || 0,
     loginLockedUntil: row.login_locked_until || "",
+    marketingAgreed: Number(row.marketing_agreed) === 1,
+    age14Agreed: Number(row.age_14_agreed) === 1,
+    withdrawnAt: row.withdrawn_at || "",
     kakaoId: row.kakao_id || "",
     naverId: row.naver_id || "",
     googleId: row.google_id || "",
@@ -204,25 +207,21 @@ async function init() {
       connectionString: url,
       ssl: url.indexOf("localhost") >= 0 || url.indexOf("127.0.0.1") >= 0
         ? false
-        : { rejectUnauthorized: false }
+        : { rejectUnauthorized: false },
+      max: 5,
+      connectionTimeoutMillis: 15000,
+      idleTimeoutMillis: 30000,
+      keepAlive: true
     });
     driver = "pg";
     await runScript(SCHEMA);
     console.log("DB: PostgreSQL");
   } else {
-    const Database = require("better-sqlite3");
-    sqlite = new Database(SQLITE_FILE);
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.exec(SCHEMA);
-    driver = "sqlite";
-    if (process.env.NODE_ENV === "production") {
-      console.warn("DATABASE_URL이 없습니다. SQLite 파일은 재배포 시 지워질 수 있습니다.");
-    } else {
-      console.log("DB: SQLite " + SQLITE_FILE);
-    }
+    throw new Error("DATABASE_URL이 필요합니다. SQLite는 쓰지 않고 Neon Postgres만 사용합니다.");
   }
-  await migrateJson();
   await ensureColumns();
+  await require("./shared_schema").apply(exec, driver);
+  await migrateJson();
   await exec(
     `CREATE TABLE IF NOT EXISTS password_resets (
       id TEXT PRIMARY KEY,
@@ -497,8 +496,8 @@ async function findUserByNamePhone(name, phone) {
 
 async function createUser(user) {
   await exec(
-    `INSERT INTO users (id, name, phone, password_hash, role, herium_linked, herium_relation, herium_note, created_at, username, email, kakao_id, naver_id, google_id, guardian_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, name, phone, password_hash, role, herium_linked, herium_relation, herium_note, created_at, username, email, kakao_id, naver_id, google_id, guardian_name, age_14_agreed, marketing_agreed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user.id,
       user.name,
@@ -514,10 +513,88 @@ async function createUser(user) {
       user.kakaoId || null,
       user.naverId || null,
       user.googleId || null,
-      user.guardianName || null
+      user.guardianName || null,
+      user.age14 ? 1 : 0,
+      user.marketing ? 1 : 0
     ]
   );
   return user;
+}
+
+async function listProducts() {
+  return exec("SELECT * FROM products ORDER BY created_at DESC");
+}
+
+async function findProduct(id) {
+  const rows = await exec("SELECT * FROM products WHERE id = ? LIMIT 1", [id]);
+  return rows[0] || null;
+}
+
+async function upsertProduct(row) {
+  const found = await findProduct(row.id);
+  if (found) {
+    await exec(
+      `UPDATE products SET name=?, price=?, sale_price=?, stock=?, category=?, thumbnail_url=?, description=?, is_hygiene_product=?, is_active=? WHERE id=?`,
+      [row.name, row.price, row.salePrice, row.stock, row.category, row.thumbnail || "", row.description || "", row.isHygiene ? 1 : 0, row.isActive ? 1 : 0, row.id]
+    );
+  } else {
+    await exec(
+      `INSERT INTO products (id, name, price, sale_price, stock, category, thumbnail_url, description, is_hygiene_product, is_active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, row.name, row.price, row.salePrice, row.stock, row.category, row.thumbnail || "", row.description || "", row.isHygiene ? 1 : 0, row.isActive ? 1 : 0, new Date().toISOString()]
+    );
+  }
+  await exec("INSERT INTO product_stock (product_id, qty) VALUES (?, ?) ON CONFLICT (product_id) DO UPDATE SET qty = excluded.qty", [row.id, row.stock]);
+  return findProduct(row.id);
+}
+
+async function upsertShopProfile(userId, fields) {
+  const id = "sp_" + String(userId).replace(/\W/g, "").slice(-16);
+  const found = await exec("SELECT id FROM shop_profiles WHERE user_id = ? LIMIT 1", [userId]);
+  const values = [
+    fields.recipient_name || "",
+    fields.recipient_phone || "",
+    fields.zipcode || "",
+    fields.address_basic || "",
+    fields.address_detail || ""
+  ];
+  if (found[0]) {
+    await exec(
+      "UPDATE shop_profiles SET recipient_name=?, recipient_phone=?, zipcode=?, address_basic=?, address_detail=? WHERE user_id=?",
+      values.concat([userId])
+    );
+  } else {
+    await exec(
+      "INSERT INTO shop_profiles (id, user_id, recipient_name, recipient_phone, zipcode, address_basic, address_detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, userId].concat(values)
+    );
+  }
+}
+
+async function withdrawUser(user) {
+  const masked = ("w" + String(user.id).replace(/\W/g, "").slice(-10)).padEnd(11, "0").slice(0, 11);
+  await exec(
+    "UPDATE users SET name='탈퇴회원', guardian_name=NULL, email=NULL, phone=?, password_hash=?, withdrawn_at=? WHERE id=?",
+    [masked, user.passwordHash, new Date().toISOString(), user.id]
+  );
+}
+
+async function companyContent() {
+  const rows = await exec("SELECT content_key, content FROM site_contents");
+  const out = {};
+  rows.forEach((row) => { out[row.content_key] = row.content; });
+  return out;
+}
+
+async function setCompanyContent(items) {
+  for (const [key, value] of Object.entries(items || {})) {
+    const found = await exec("SELECT id FROM site_contents WHERE content_key = ? LIMIT 1", [key]);
+    if (found[0]) await exec("UPDATE site_contents SET content = ?, updated_at = ? WHERE content_key = ?", [value, new Date().toISOString(), key]);
+    else await exec(
+      "INSERT INTO site_contents (id, content_key, title, content, image_url, updated_at) VALUES (?, ?, ?, ?, '', ?)",
+      ["sc_" + crypto.randomUUID(), key, key, value, new Date().toISOString()]
+    );
+  }
 }
 
 async function clearLoginFailure(id) {
@@ -650,11 +727,13 @@ async function createPendingCheckout(order, items) {
     let held = false;
     for (const item of items) {
       const found = await tx("SELECT qty FROM product_stock WHERE product_id = ?", [item.id]);
-      if (!found.rows.length) continue;
+      const product = await tx("SELECT stock FROM products WHERE id = ?", [item.id]);
+      if (!found.rows.length && !product.rows.length) continue;
       const updated = await tx(
         "UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND qty >= ?",
         [item.qty, item.id, item.qty]
       );
+      await tx("UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?", [item.qty, item.id, item.qty]);
       if (!updated.changes) {
         const err = new Error("재고가 부족한 상품이 있습니다.");
         err.status = 409;
@@ -682,6 +761,18 @@ async function createPendingCheckout(order, items) {
         order.createdAt
       ]
     );
+    for (const item of items) {
+      await tx(
+        "INSERT INTO order_items (id, order_id, product_id, product_name, unit_price, quantity) VALUES (?, ?, ?, ?, ?, ?)",
+        ["oi_" + crypto.randomUUID(), order.id, item.id, item.name, item.unit, item.qty]
+      );
+    }
+    try {
+      await tx(
+        "UPDATE orders SET recipient_name=?, recipient_phone=?, zipcode=?, address_basic=?, address_detail=? WHERE id=?",
+        [order.name, order.phone, order.zipcode || "", order.address, order.addressDetail || "", order.id]
+      );
+    } catch (_e) {}
     await tx(
       `INSERT INTO payments (id, order_id, toss_order_id, payment_key, amount, status, method, stock_held, created_at, approved_at)
        VALUES (?, ?, ?, NULL, ?, 'PENDING', NULL, ?, ?, NULL)`,
@@ -706,6 +797,7 @@ async function applyPaymentResult(tossOrderId, next) {
         const found = await tx("SELECT qty FROM product_stock WHERE product_id = ?", [item.id]);
         if (!found.rows.length) continue;
         await tx("UPDATE product_stock SET qty = qty + ? WHERE product_id = ?", [item.qty, item.id]);
+        await tx("UPDATE products SET stock = stock + ? WHERE id = ?", [item.qty, item.id]);
       }
       await tx("UPDATE payments SET stock_held = 0 WHERE id = ?", [payment.id]);
     }
@@ -718,10 +810,13 @@ async function applyPaymentResult(tossOrderId, next) {
   });
 }
 
-async function updateOrderStatus(id, status) {
+async function updateOrderStatus(id, status, extra) {
   const rows = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
   if (!rows[0]) return null;
   await exec("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+  if (extra && extra.tracking_number) {
+    try { await exec("UPDATE orders SET tracking_number = ? WHERE id = ?", [extra.tracking_number, id]); } catch (_e) {}
+  }
   return mapOrder(Object.assign({}, rows[0], { status: status }));
 }
 
@@ -823,5 +918,12 @@ module.exports = {
   openPasswordHelp,
   listPasswordHelp,
   findOpenPasswordHelp,
-  closePasswordHelp
+  closePasswordHelp,
+  listProducts,
+  findProduct,
+  upsertProduct,
+  upsertShopProfile,
+  withdrawUser,
+  companyContent,
+  setCompanyContent
 };
