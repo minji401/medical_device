@@ -89,13 +89,20 @@ function xmlUrl(loc, changefreq, priority) {
 }
 
 app.get("/robots.txt", (_req, res) => {
-  res.type("text/plain; charset=utf-8").send(
+  res.type("text/plain").send(
     [
       "User-agent: *",
       "Allow: /",
       "Disallow: /admin/",
       "Disallow: /admin.html",
       "Disallow: /api/",
+      "",
+      "User-agent: Yeti",
+      "Allow: /",
+      "Disallow: /admin/",
+      "Disallow: /admin.html",
+      "Disallow: /api/",
+      "",
       "Sitemap: https://hyundaimedi.com/sitemap.xml",
       ""
     ].join("\n")
