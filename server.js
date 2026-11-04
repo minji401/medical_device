@@ -68,6 +68,9 @@ app.use((req, res, next) => {
   return res.redirect(301, "https://" + host + req.originalUrl);
 });
 app.use(guard.stagingAuth);
+app.use(guard.helmetMw());
+app.use(guard.corsMw);
+app.use(guard.apiLimiter);
 app.use(guard.securityHeaders);
 app.use(express.json({ limit: "200kb" }));
 app.use(guard.requireFetchHeader);
@@ -77,8 +80,10 @@ const pages = [
   "login", "signup", "find-id", "find-password", "reset-password", "account", "mypage", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms", "returns"
 ];
 
-app.use("/css", express.static(path.join(ROOT, "css")));
-app.use("/js", express.static(path.join(ROOT, "js")));
+const staticOpts = { dotfiles: "deny", index: false, fallthrough: true };
+app.use("/css", express.static(path.join(ROOT, "css"), staticOpts));
+app.use("/js", express.static(path.join(ROOT, "js"), staticOpts));
+app.use("/uploads", express.static(path.join(ROOT, "uploads"), staticOpts));
 
 pages.forEach((name) => {
   const file = path.join(ROOT, name + ".html");
@@ -279,19 +284,20 @@ function setSession(res, userId) {
     "SameSite=Lax",
     "Max-Age=" + 14 * 24 * 60 * 60
   ];
-  if (!DEBUG) bits.push("Secure");
+  if (IS_PROD || !DEBUG) bits.push("Secure");
   res.append("Set-Cookie", bits.join("; "));
 }
 
 function clearSession(res) {
   const bits = [COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"];
-  if (!DEBUG) bits.push("Secure");
+  if (IS_PROD || !DEBUG) bits.push("Secure");
   res.append("Set-Cookie", bits.join("; "));
 }
 
 function publicUser(user) {
   if (!user) return null;
   const phone = validPhone(normalizePhone(user.phone)) ? user.phone : "";
+  const isAdmin = (user.role || "") === "admin";
   return {
     id: user.id,
     name: user.name,
@@ -302,7 +308,8 @@ function publicUser(user) {
     zipcode: "",
     addressBasic: "",
     addressDetail: "",
-    role: user.role || "user"
+    role: isAdmin ? "admin" : (user.role || "user"),
+    isAdmin
   };
 }
 
@@ -318,7 +325,11 @@ async function publicUserWithShop(user) {
       base.address = [shop.zipcode, shop.address_basic, shop.address_detail].filter(Boolean).join(" ").trim();
     }
   }
-  if ((user.role || "") === "admin") base.adminPath = "/" + ADMIN_URL_PATH;
+  if (base.isAdmin || (user.role || "") === "admin") {
+    base.adminPath = "/" + ADMIN_URL_PATH;
+    base.isAdmin = true;
+    base.role = "admin";
+  }
   return base;
 }
 
@@ -336,7 +347,11 @@ function validUsername(raw) {
 }
 
 function safeNext(raw) {
-  const value = String(raw || "").trim();
+  let value = String(raw || "").trim();
+  if (value.startsWith("/")) value = value.slice(1);
+  const pathOnly = value.split(/[#?]/)[0];
+  if (pathOnly === ADMIN_URL_PATH || pathOnly === ADMIN_URL_PATH + ".html") return "/" + ADMIN_URL_PATH;
+  if (DEBUG && /^(admin|admin\.html)$/i.test(pathOnly)) return "/admin.html";
   if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(value)) return "/mypage.html";
   if (/^(admin|account)\.html/i.test(value)) return "/mypage.html";
   return "/" + value;
@@ -345,12 +360,14 @@ function safeNext(raw) {
 function setOauth(res, payload) {
   const token = sign(Object.assign({ exp: Date.now() + 10 * 60 * 1000 }, payload));
   const bits = ["hm_oauth=" + token, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=600"];
-  if (!DEBUG) bits.push("Secure");
+  if (IS_PROD || !DEBUG) bits.push("Secure");
   res.append("Set-Cookie", bits.join("; "));
 }
 
 function clearOauth(res) {
-  res.append("Set-Cookie", "hm_oauth=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  const bits = ["hm_oauth=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"];
+  if (IS_PROD || !DEBUG) bits.push("Secure");
+  res.append("Set-Cookie", bits.join("; "));
 }
 
 function normalizeSocialPhone(raw) {
@@ -409,20 +426,46 @@ async function upsertSocialUser(provider, profile) {
   return user;
 }
 
+function looksLikeAdminLogin(user, login) {
+  const keys = [login, user && user.username, user && user.email]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  return keys.some((key) => key === "admin" || key === "admin@example.com");
+}
+
+async function ensureAdminRole(user, login) {
+  if (!user) return user;
+  if (user.role === "admin") {
+    user.isAdmin = true;
+    return user;
+  }
+  let herium = null;
+  try {
+    herium = await db.findHeriumAccount(login || user.username || user.email || "");
+    if (!herium && user.phone) herium = await db.findHeriumAccount(user.phone);
+  } catch (_e) {}
+  if (looksLikeAdminLogin(user, login) || db.heriumIsAdmin(herium)) {
+    await db.setUserRole(user.id, "admin");
+    user.role = "admin";
+    user.isAdmin = true;
+  }
+  return user;
+}
+
 async function currentUser(req) {
   const header = String(req.headers.authorization || "");
   if (header.toLowerCase().startsWith("bearer ")) {
     const data = readAccessToken(header.slice(7).trim());
     if (data && data.sub) {
       const user = await db.findUserById(data.sub);
-      if (user && !user.withdrawnAt) return user;
+      if (user && !user.withdrawnAt) return ensureAdminRole(user);
     }
   }
   const payload = unsign(parseCookies(req)[COOKIE]);
   if (!payload) return null;
   const user = await db.findUserById(payload.uid);
   if (user && user.withdrawnAt) return null;
-  return user;
+  return user ? ensureAdminRole(user) : null;
 }
 
 async function requireUser(req, res, next) {
@@ -493,7 +536,7 @@ app.patch("/api/me", requireUser, async (req, res) => {
   res.json({ user: await publicUserWithShop(await db.findUserById(req.user.id)) });
 });
 
-app.post("/api/signup", async (req, res) => {
+app.post("/api/signup", guard.signupLimiter, async (req, res) => {
   if (!guard.registrationOpen()) {
     return res.status(403).json({ error: "현재 정식 오픈 준비 중입니다." });
   }
@@ -557,33 +600,38 @@ app.post("/api/signup", async (req, res) => {
 });
 
 async function linkHeriumLogin(login, password, sharedUser) {
-  const herium = db.findHeriumAccount(login);
+  const herium = await db.findHeriumAccount(login);
   if (!herium || !herium.isActive) return null;
   if (herium.status === "suspended" || herium.status === "withdrawn") return null;
   if (!verifyDjangoPassword(password, herium.password)) return null;
-  if (!validPhone(herium.phone)) return null;
+  const staff = db.heriumIsAdmin(herium);
   const passwordHash = hashPassword(password);
   const samePerson = (user) => {
     if (!user) return false;
-    const samePhone = normalizePhone(user.phone) === herium.phone;
+    const samePhone = herium.phone && normalizePhone(user.phone) === herium.phone;
     const sameId = String(user.username || "").toLowerCase() === herium.username.toLowerCase();
-    return samePhone || sameId;
+    const sameEmail = herium.email && String(user.email || "").toLowerCase() === herium.email.toLowerCase();
+    return samePhone || sameId || sameEmail;
   };
-  if (sharedUser && !samePerson(sharedUser)) return null;
-  const target = sharedUser && samePerson(sharedUser) ? sharedUser : await db.findUserByPhone(herium.phone);
+  if (sharedUser && !samePerson(sharedUser) && !staff) return null;
+  let target = sharedUser && samePerson(sharedUser) ? sharedUser : null;
+  if (!target && herium.phone) target = await db.findUserByPhone(herium.phone);
+  if (!target && herium.username) target = await db.findUserByUsername(herium.username);
   if (target) {
     await db.updatePassword(target.id, passwordHash);
     await db.setUsername(target.id, herium.username);
     if (herium.name) await db.setGuardianName(target.id, herium.name);
-    return db.findUserById(target.id);
+    if (staff) await db.setUserRole(target.id, "admin");
+    return ensureAdminRole(await db.findUserById(target.id), login);
   }
+  if (!validPhone(herium.phone)) return null;
   const created = {
     id: "u_" + crypto.randomUUID(),
     name: "",
     username: herium.username,
     phone: herium.phone,
     passwordHash,
-    role: herium.isStaff || herium.role === "admin" ? "admin" : "user",
+    role: staff ? "admin" : "user",
     heriumLinked: true,
     guardianName: String(herium.name || "").slice(0, 40),
     heriumRelation: "",
@@ -592,17 +640,18 @@ async function linkHeriumLogin(login, password, sharedUser) {
   };
   try {
     await db.createUser(created);
-    return created;
+    return ensureAdminRole(created, login);
   } catch (_err) {
     const again = await db.findUserByPhone(herium.phone);
     if (!again) return null;
     await db.updatePassword(again.id, passwordHash);
     await db.setUsername(again.id, herium.username);
-    return db.findUserById(again.id);
+    if (staff) await db.setUserRole(again.id, "admin");
+    return ensureAdminRole(await db.findUserById(again.id), login);
   }
 }
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", guard.loginLimiter, async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
   if (tooMany(ip)) return res.status(429).json({ error: "잠시 후 다시 시도해 주세요." });
   const login = String(req.body.login || req.body.username || req.body.phone || "").trim();
@@ -621,6 +670,7 @@ app.post("/api/login", async (req, res) => {
   if (user && verifyPassword(password, user.passwordHash)) {
     if (passwords.needsRehash(user.passwordHash)) await db.updatePassword(user.id, hashPassword(password));
     await db.clearLoginFailure(user.id);
+    await ensureAdminRole(user, login);
     setSession(res, user.id);
     return res.json({ user: await publicUserWithShop(user), token: issueAccessToken(user) });
   }
@@ -630,6 +680,7 @@ app.post("/api/login", async (req, res) => {
       const state = await db.noteLoginFailure(user.id, user.loginFailures);
       if (state.locked) return res.status(423).json({ error: db.lockMessage({ loginLockedUntil: state.until }) });
     }
+    try { await db.writeAudit("anon", "login_failed", String(login || "").slice(0, 80), ip); } catch (_e) {}
     return res.status(401).json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
   }
   await db.clearLoginFailure(linked.id);
@@ -647,7 +698,7 @@ app.post("/api/find-id", async (req, res) => {
   if (user && sameName(user.name, name)) {
     return res.json({ username: user.username || "", phone: user.phone });
   }
-  const herium = db.findHeriumByNamePhone(name, phone);
+  const herium = await db.findHeriumByNamePhone(name, phone);
   if (!herium || herium.status === "suspended" || herium.status === "withdrawn" || !herium.isActive) {
     return res.status(404).json({ error: "일치하는 회원 정보가 없습니다." });
   }
@@ -985,10 +1036,26 @@ app.get("/api/products/:id", async (req, res) => {
 async function requireAdmin(req, res, next) {
   const user = await currentUser(req);
   if (!user) return res.status(401).json({ error: "로그인이 필요합니다." });
-  if (user.role !== "admin") return res.status(403).json({ error: "관리자만 사용할 수 있습니다." });
+  if (user.role !== "admin" && !user.isAdmin) {
+    return res.status(403).json({ error: "관리자만 사용할 수 있습니다." });
+  }
   req.user = user;
   next();
 }
+
+app.post("/api/admin/upload", requireAdmin, (req, res) => {
+  const { uploadImage, saveProductImage } = require("./server/upload");
+  uploadImage(req, res, async (err) => {
+    if (err) return res.status(err.status || 400).json({ error: err.message || "업로드에 실패했습니다." });
+    try {
+      const url = saveProductImage(req.file);
+      await db.writeAudit(req.user.id, "admin_upload", url, req.ip || "");
+      res.json({ ok: true, url });
+    } catch (saveErr) {
+      res.status(saveErr.status || 500).json({ error: saveErr.message || "업로드에 실패했습니다." });
+    }
+  });
+});
 
 app.post("/api/admin/products", requireAdmin, async (req, res) => {
   if (!String(req.body.name || "").trim() || !Number(req.body.price)) {
@@ -1037,13 +1104,15 @@ app.get("/api/admin/members", requireAdmin, async (_req, res) => {
   res.json({ totals: users });
 });
 
-app.use((err, _req, res, next) => {
+app.use((err, req, res, next) => {
   if (!err) return next();
-  console.error(err);
-  if (_req.path && String(_req.path).startsWith("/api/")) {
-    return res.status(500).json({ error: "서버 오류가 발생했습니다." });
+  if (DEBUG) console.error(err);
+  else console.error(err && err.message ? err.message : err);
+  const status = Number(err.status) >= 400 && Number(err.status) < 600 ? Number(err.status) : 500;
+  if (req.path && String(req.path).startsWith("/api/")) {
+    return res.status(status).json({ error: status === 500 ? "서버 오류가 발생했습니다." : (err.message || "요청을 처리하지 못했습니다.") });
   }
-  res.status(500).sendFile(path.join(ROOT, "500.html"));
+  res.status(status === 500 ? 500 : status).sendFile(path.join(ROOT, status === 404 ? "404.html" : "500.html"));
 });
 
 app.use((req, res) => {

@@ -160,7 +160,13 @@ async function applyVerified(tossPayment) {
     if (!tossPayment || !tossPayment.orderId) return null;
     const saved = await db.findPaymentByTossOrderId(tossPayment.orderId);
     if (!saved) return null;
-    if (Number(tossPayment.totalAmount) !== saved.amount) return null;
+    const order = await db.findOrderByNumber(tossPayment.orderId);
+    const expected = order
+      ? Number(order.totalAmount != null ? order.totalAmount : order.total)
+      : saved.amount;
+    if (Number(tossPayment.totalAmount) !== Number(expected) || Number(tossPayment.totalAmount) !== Number(saved.amount)) {
+      return null;
+    }
     const next = nextFromToss(tossPayment);
     if (!next) return null;
     return await db.applyPaymentResult(tossPayment.orderId, next);
@@ -202,15 +208,23 @@ async function confirmTossOrder({ paymentKey, orderId, amount, ip }) {
       throw err;
     }
     if (order.status === "PAID") {
-      return { ok: true, already: true, status: "PAID", orderId: order.number, amount: order.total };
+      const paidIds = (order.items || []).map((item) => item.id || item.product_id).filter(Boolean);
+      return { ok: true, already: true, status: "PAID", orderId: order.number, amount: order.total, productIds: paidIds };
     }
     if (order.status !== "READY" && order.status !== "PENDING") {
       const err = new Error("결제할 수 없는 주문 상태입니다.");
       err.status = 409;
       throw err;
     }
-    const expected = Number(order.total);
-    if (!Number.isInteger(claimed) || claimed !== expected) {
+    const expected = Number(order.totalAmount != null ? order.totalAmount : order.total);
+    const goods = (order.items || []).reduce((sum, item) => {
+      const line = Number(item.total || item.subtotal_amount);
+      if (Number.isFinite(line) && line > 0) return sum + line;
+      return sum + (Number(item.unit || item.unit_price) || 0) * (Number(item.qty || item.quantity) || 1);
+    }, 0);
+    const fee = Number(order.shippingFee) || 0;
+    const recomputed = goods + fee;
+    if (!Number.isInteger(claimed) || claimed !== expected || (recomputed > 0 && recomputed !== expected)) {
       try {
         await db.writeAudit("system", "payment_tamper", number + ":expected=" + expected + ":claimed=" + claimed, ip || "");
       } catch (_e) {}
@@ -267,7 +281,8 @@ async function confirmTossOrder({ paymentKey, orderId, amount, ip }) {
       } catch (cartErr) {
         console.error("cart clear after confirm", cartErr && cartErr.message);
       }
-      return { ok: true, already: Boolean(saved && saved.already), status: "PAID", orderId: number, amount: expected };
+      const productIds = (order.items || []).map((item) => item.id || item.product_id).filter(Boolean);
+      return { ok: true, already: Boolean(saved && saved.already), status: "PAID", orderId: number, amount: expected, productIds };
     } catch (err) {
       try {
         await cancelTossPayment(key, "주문 저장 실패 자동취소");
@@ -435,11 +450,28 @@ function attach(app, deps) {
   app.post("/api/payments/webhook", async (req, res) => {
     try {
       if (!tossKeys().secret) return res.status(200).json({ ok: true });
+      const expectedAuth = String(process.env.TOSS_WEBHOOK_SECRET || "").trim();
+      if (expectedAuth) {
+        const given = String(req.get("authorization") || "");
+        const ok = given === expectedAuth || given === "Basic " + Buffer.from(expectedAuth + ":").toString("base64");
+        if (!ok) {
+          require("./security_log").event("webhook_auth_fail", { ip: req.ip || "" });
+          return res.status(401).json({ ok: false });
+        }
+      }
       const body = req.body || {};
       const data = body.data && body.data.paymentKey ? body.data : body;
       const paymentKey = data && data.paymentKey;
       if (!paymentKey) return res.status(200).json({ ok: true });
       const looked = await tossRequest("/" + encodeURIComponent(paymentKey));
+      if (!looked || !looked.orderId) return res.status(200).json({ ok: true });
+      const order = await db.findOrderByNumber(looked.orderId);
+      if (!order) return res.status(200).json({ ok: true });
+      const expected = Number(order.totalAmount != null ? order.totalAmount : order.total);
+      if (Number(looked.totalAmount) !== expected) {
+        await db.writeAudit("system", "webhook_tamper", looked.orderId + ":" + looked.totalAmount, req.ip || "");
+        return res.status(200).json({ ok: true });
+      }
       await applyVerified(looked);
       return res.status(200).json({ ok: true });
     } catch (err) {

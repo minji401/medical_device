@@ -345,6 +345,9 @@ async function writeAudit(actor, action, target, ip) {
       new Date().toISOString()
     ]
   );
+  try {
+    require("./security_log").event("audit", { actor, action, target, ip: ip || "" });
+  } catch (_e) {}
 }
 
 async function findUserById(id) {
@@ -428,12 +431,16 @@ function withHerium(read) {
   }
 }
 
+function truthyFlag(value) {
+  return value === true || value === 1 || value === "1" || value === "t" || value === "true";
+}
+
 function heriumSelect(herium) {
   const cols = herium.prepare("PRAGMA table_info(accounts_profile)").all().map((col) => col.name);
   const role = cols.includes("role") ? "p.role" : "'member'";
   const status = cols.includes("status") ? "p.status" : "'active'";
   return herium.prepare(
-    "SELECT u.username, u.password, u.first_name, u.is_active, u.is_staff, " +
+    "SELECT u.username, u.email, u.password, u.first_name, u.is_active, u.is_staff, u.is_superuser, " +
     "p.name AS profile_name, p.phone AS profile_phone, " +
     role + " AS profile_role, " + status + " AS profile_status " +
     "FROM auth_user u LEFT JOIN accounts_profile p ON p.user_id = u.id"
@@ -442,24 +449,58 @@ function heriumSelect(herium) {
 
 function mapHerium(row) {
   if (!row) return null;
+  const staff = truthyFlag(row.is_staff) || truthyFlag(row.is_superuser);
+  const profileRole = row.profile_role || "member";
   return {
     username: row.username || "",
+    email: row.email || "",
     password: row.password || "",
     name: row.profile_name || row.first_name || row.username || "",
     phone: String(row.profile_phone || "").replace(/\D/g, ""),
-    isActive: Number(row.is_active) === 1,
-    isStaff: Number(row.is_staff) === 1,
-    role: row.profile_role || "member",
+    isActive: truthyFlag(row.is_active),
+    isStaff: staff,
+    isSuperuser: truthyFlag(row.is_superuser),
+    role: staff || profileRole === "admin" ? "admin" : profileRole,
     status: row.profile_status || "active"
   };
 }
 
-function findHeriumAccount(login) {
+function heriumIsAdmin(herium) {
+  if (!herium) return false;
+  return Boolean(herium.isStaff || herium.isSuperuser || herium.role === "admin");
+}
+
+async function findDjangoAccount(login) {
+  const loginId = String(login || "").trim();
+  if (!loginId || !pool) return null;
+  const digits = loginId.replace(/\D/g, "");
+  const phone = /^01[016789]\d{7,8}$/.test(digits) ? digits : "";
+  try {
+    const result = await pool.query(
+      "SELECT u.username, u.email, u.password, u.first_name, u.is_active, u.is_staff, u.is_superuser, " +
+      "p.name AS profile_name, p.phone AS profile_phone, p.role AS profile_role, p.status AS profile_status " +
+      "FROM auth_user u LEFT JOIN accounts_profile p ON p.user_id = u.id " +
+      "WHERE lower(u.username) = lower($1) " +
+      "OR (COALESCE(u.email, '') <> '' AND lower(u.email) = lower($1)) " +
+      "OR ($2 <> '' AND regexp_replace(COALESCE(p.phone, ''), '[^0-9]', '', 'g') = $2) " +
+      "LIMIT 1",
+      [loginId, phone]
+    );
+    return mapHerium(result.rows[0]);
+  } catch (err) {
+    console.error("auth_user lookup failed", err && err.message);
+    return null;
+  }
+}
+
+async function findHeriumAccount(login) {
+  if (driver === "pg") return findDjangoAccount(login);
   const loginId = String(login || "").trim();
   const digits = loginId.replace(/\D/g, "");
   return withHerium((herium) => {
     const hit = heriumSelect(herium).find((row) => {
       if (String(row.username || "").toLowerCase() === loginId.toLowerCase()) return true;
+      if (String(row.email || "").toLowerCase() === loginId.toLowerCase()) return true;
       const phone = String(row.profile_phone || "").replace(/\D/g, "");
       return /^01[016789]\d{7,8}$/.test(digits) && phone === digits;
     });
@@ -467,10 +508,29 @@ function findHeriumAccount(login) {
   });
 }
 
-function findHeriumByNamePhone(name, phone) {
+async function findHeriumByNamePhone(name, phone) {
   const digits = String(phone || "").replace(/\D/g, "");
   const wanted = String(name || "").replace(/\s/g, "");
   if (!digits || !wanted) return null;
+  if (driver === "pg" && pool) {
+    try {
+      const result = await pool.query(
+        "SELECT u.username, u.email, u.password, u.first_name, u.is_active, u.is_staff, u.is_superuser, " +
+        "p.name AS profile_name, p.phone AS profile_phone, p.role AS profile_role, p.status AS profile_status " +
+        "FROM auth_user u LEFT JOIN accounts_profile p ON p.user_id = u.id " +
+        "WHERE regexp_replace(COALESCE(p.phone, ''), '[^0-9]', '', 'g') = $1 LIMIT 8",
+        [digits]
+      );
+      const hit = result.rows.find((row) => {
+        const rowName = String(row.profile_name || row.first_name || "").replace(/\s/g, "");
+        return rowName === wanted;
+      });
+      return mapHerium(hit);
+    } catch (err) {
+      console.error("auth_user name/phone lookup failed", err && err.message);
+      return null;
+    }
+  }
   return withHerium((herium) => {
     const hit = heriumSelect(herium).find((row) => {
       const rowName = String(row.profile_name || row.first_name || "").replace(/\s/g, "");
@@ -523,6 +583,12 @@ async function linkSocial(id, provider, socialId) {
 
 async function updatePassword(id, passwordHash) {
   await exec("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, id]);
+}
+
+async function setUserRole(id, role) {
+  const next = String(role || "user") === "admin" ? "admin" : "user";
+  if (!id) return;
+  await exec("UPDATE users SET role = ? WHERE id = ?", [next, id]);
 }
 
 async function updateBuyerProfile(id, fields) {
@@ -1107,11 +1173,8 @@ async function updateOrderStatus(id, status, extra) {
 async function clearPurchasedCart(userId, productIds) {
   if (!userId) return;
   const ids = (productIds || []).map((id) => String(id || "")).filter(Boolean);
+  if (!ids.length) return;
   try {
-    if (!ids.length) {
-      await exec("DELETE FROM cart_items WHERE user_id = ?", [userId]);
-      return;
-    }
     for (const productId of ids) {
       await exec("DELETE FROM cart_items WHERE user_id = ? AND product_id = ?", [userId, productId]);
     }
@@ -1189,6 +1252,8 @@ module.exports = {
   findUserByLogin,
   findHeriumAccount,
   findHeriumByNamePhone,
+  heriumIsAdmin,
+  setUserRole,
   setUsername,
   findUserBySocial,
   findUserByEmail,

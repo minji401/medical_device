@@ -1,5 +1,15 @@
 const crypto = require("crypto");
+const helmet = require("helmet");
+const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const hits = new Map();
+
+const CORS_ORIGINS = [
+  "https://hyundaimedi.com",
+  "https://www.hyundaimedi.com",
+  "https://heriumcare.com",
+  "https://www.heriumcare.com"
+];
 
 function tooMany(bucket, ip, limit, windowMs) {
   const key = bucket + ":" + (ip || "unknown");
@@ -101,12 +111,70 @@ function securityHeaders(req, res, next) {
 
 function requireFetchHeader(req, res, next) {
   if (req.method !== "POST" && req.method !== "PATCH" && req.method !== "DELETE") return next();
-  if (!req.path.startsWith("/api/") || req.path === "/api/payments/webhook") return next();
+  const p = String(req.path || "");
+  if (p === "/api/payments/webhook") return next();
+  if (!p.startsWith("/api/") && !p.startsWith("/orders/")) return next();
   if (req.get("X-Requested-With") !== "fetch") {
     return res.status(403).json({ error: "요청을 확인할 수 없습니다." });
   }
   next();
 }
+
+function helmetMw() {
+  return helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    frameguard: { action: "deny" },
+    hsts: isDebug() ? false : { maxAge: 31536000, includeSubDomains: true, preload: true }
+  });
+}
+
+function corsMw(req, res, next) {
+  return cors({
+    origin(origin, cb) {
+      if (!origin) return cb(null, true);
+      if (CORS_ORIGINS.indexOf(origin) >= 0) return cb(null, true);
+      if (isDebug() && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return cb(null, true);
+      cb(null, false);
+    },
+    credentials: true
+  })(req, res, next);
+}
+
+const jsonLimitMessage = { error: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요." };
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip(req) {
+    const p = String(req.path || "");
+    if (p === "/healthz" || p === "/api/payments/webhook") return true;
+    if (req.method === "GET" && p.indexOf("/api/") !== 0) return true;
+    return false;
+  },
+  message: jsonLimitMessage
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: jsonLimitMessage
+});
+
+const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: jsonLimitMessage
+});
 
 function registrationOpen() {
   const value = String(process.env.ALLOW_REGISTRATION || "true").trim().toLowerCase();
@@ -133,4 +201,17 @@ function stagingAuth(req, res, next) {
   res.status(401).type("text").send("인증이 필요합니다.");
 }
 
-module.exports = { tooMany, isDebug, hostAllow, securityHeaders, requireFetchHeader, registrationOpen, stagingAuth };
+module.exports = {
+  tooMany,
+  isDebug,
+  hostAllow,
+  securityHeaders,
+  requireFetchHeader,
+  registrationOpen,
+  stagingAuth,
+  helmetMw,
+  corsMw,
+  apiLimiter,
+  loginLimiter,
+  signupLimiter
+};

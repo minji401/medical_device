@@ -30,6 +30,8 @@ const ICONS = {
 };
 
 const CART_KEY = "oncare-cart";
+const CHECKOUT_ITEMS_KEY = "oncare-checkout-items";
+const CART_STORAGE_KEYS = ["oncare-cart", "hyundai_cart_items", "cart", "oncare-checkout-items", "oncare-checkout-ids"];
 
 function cart() {
   return JSON.parse(localStorage.getItem(CART_KEY) || "[]");
@@ -37,6 +39,42 @@ function cart() {
 function saveCart(items) {
   localStorage.setItem(CART_KEY, JSON.stringify(items));
   updateCartCount();
+}
+function wipeClientCart() {
+  CART_STORAGE_KEYS.forEach((key) => {
+    try { localStorage.removeItem(key); } catch (_e) {}
+    try { sessionStorage.removeItem(key); } catch (_e) {}
+  });
+  document.querySelectorAll("[data-cart-count]").forEach((el) => {
+    el.textContent = "0";
+    el.style.display = "none";
+  });
+}
+async function logout() {
+  try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_e) {}
+  try { localStorage.removeItem("sso_access_token"); } catch (_e) {}
+  wipeClientCart();
+  location.href = "index.html";
+}
+function checkoutItems() {
+  try {
+    const picked = JSON.parse(sessionStorage.getItem(CHECKOUT_ITEMS_KEY) || "[]");
+    if (Array.isArray(picked) && picked.length) return picked;
+  } catch (_e) {}
+  return cart();
+}
+function rememberCheckoutItems(items) {
+  try { sessionStorage.setItem(CHECKOUT_ITEMS_KEY, JSON.stringify(items || [])); } catch (_e) {}
+}
+function removeOrderedFromCart(productIds) {
+  const drop = new Set((productIds || []).map((id) => String(id)));
+  if (!drop.size) {
+    try {
+      (JSON.parse(sessionStorage.getItem(CHECKOUT_ITEMS_KEY) || "[]") || []).forEach((item) => drop.add(String(item.id)));
+    } catch (_e) {}
+  }
+  if (drop.size) saveCart(cart().filter((item) => !drop.has(String(item.id))));
+  try { sessionStorage.removeItem(CHECKOUT_ITEMS_KEY); } catch (_e) {}
 }
 function addToCart(id, qty = 1) {
   const items = cart();
@@ -107,6 +145,7 @@ function headerHTML(page) {
           <span><small>전문상담</small><b>054-334-9986</b></span>
         </a>
         <a class="auth-chip" id="auth-link" href="login.html" title="로그인">로그인</a>
+        <button class="auth-chip" id="logout-link" type="button" data-logout hidden>로그아웃</button>
         <button class="icon-btn" data-open-cart aria-label="장바구니">🛒<span class="cart-count" data-cart-count>0</span></button>
       </div>
     </div>
@@ -151,9 +190,12 @@ function footerHTML() {
         <h3>장바구니</h3>
         <button class="icon-btn" data-close-cart>✕</button>
       </div>
+      <label class="cart-select-all" id="cart-select-bar">
+        <input type="checkbox" id="cart-select-all" checked /> 전체 선택
+      </label>
       <div id="cart-list"></div>
       <div class="cart-total" id="cart-total"></div>
-      <a class="btn btn-teal btn-lg" style="width:100%" href="checkout.html">주문 접수하기</a>
+      <button class="btn btn-teal btn-lg" type="button" data-cart-checkout style="width:100%">선택 상품 주문하기</button>
     </aside>
   </div>`;
 }
@@ -268,12 +310,32 @@ async function apiMe() {
 }
 
 function loginNext() {
-  let raw = getParam("next") || "mypage.html";
-  if (/^account\.html/i.test(raw)) raw = "mypage.html";
+  let raw = String(getParam("next") || "").trim();
+  if (!raw) return "mypage.html";
+  raw = raw.replace(/^\/+/, "");
+  if (/^account\.html/i.test(raw)) return "mypage.html";
   const file = String(raw.split(/[#?]/)[0] || "");
-  if (/^[a-z0-9_-]+$/i.test(file)) raw = file + ".html" + raw.slice(file.length);
-  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(raw)) return "mypage.html";
+  if (!/^[a-z0-9_-]+(\.html)?$/i.test(file)) return "mypage.html";
   return raw;
+}
+
+function isAdminUser(user) {
+  return Boolean(user && (user.isAdmin || user.role === "admin"));
+}
+
+function afterLoginRedirect(user) {
+  const next = loginNext();
+  const file = String(next.split(/[#?]/)[0] || "");
+  const adminReturn = /^admin(\.html)?$/i.test(file) || (!/\.html$/i.test(file) && file !== "mypage");
+  if (adminReturn && !isAdminUser(user)) {
+    showFormError("#login-error", "관리자 권한이 없는 계정입니다. 헤리움 관리자 계정으로 로그인해 주세요.");
+    return;
+  }
+  if (adminReturn && isAdminUser(user)) {
+    location.href = file.indexOf(".html") >= 0 ? file : "/" + file;
+    return;
+  }
+  location.href = next;
 }
 
 function showFormError(id, msg) {
@@ -327,17 +389,19 @@ function refreshAuth() {
   return apiMe().then((user) => {
     window.currentUser = user;
     const link = document.querySelector("#auth-link");
+    const logoutBtn = document.querySelector("#logout-link");
     if (link) {
       if (user) {
         link.href = "mypage.html";
         link.title = "마이페이지";
-        link.textContent = user.name + "님";
+        link.textContent = (user.name || user.username || "회원") + "님";
       } else {
         link.href = "login.html";
         link.title = "로그인";
         link.textContent = "로그인";
       }
     }
+    if (logoutBtn) logoutBtn.hidden = !user;
     return user;
   });
 }
@@ -405,32 +469,86 @@ function renderCards(selector, list) {
   el.innerHTML = list.length ? list.map(productCard).join("") : `<p class="empty">해당하는 상품이 없습니다.</p>`;
 }
 
+function cartLinePay(item) {
+  const p = productById(item.id);
+  if (!p) return 0;
+  const unit = isWelfare(p) ? copay(p.price) : (p.salePrice || p.price);
+  return unit * (Number(item.qty) || 1);
+}
+
+function selectedCartIds() {
+  const boxes = document.querySelectorAll("[data-cart-check]");
+  if (!boxes.length) return cart().map((item) => String(item.id));
+  return Array.from(boxes).filter((box) => box.checked).map((box) => box.getAttribute("data-cart-check"));
+}
+
+function updateCartTotals() {
+  const totalEl = document.querySelector("#cart-total");
+  const bar = document.querySelector("#cart-select-bar");
+  const items = cart();
+  const boxes = document.querySelectorAll("[data-cart-check]");
+  const all = document.querySelector("#cart-select-all");
+  if (bar) bar.hidden = !items.length;
+  if (!items.length) {
+    if (totalEl) totalEl.innerHTML = "";
+    return;
+  }
+  const selected = new Set(selectedCartIds());
+  if (all && boxes.length) {
+    all.checked = Array.from(boxes).every((box) => box.checked);
+    all.indeterminate = Array.from(boxes).some((box) => box.checked) && !all.checked;
+  }
+  const goods = items.reduce((sum, item) => selected.has(String(item.id)) ? sum + cartLinePay(item) : sum, 0);
+  const ship = goods >= 50000 || goods <= 0 ? 0 : 3000;
+  const pay = goods + ship;
+  if (totalEl) {
+    totalEl.innerHTML = `<div class="cart-summary-row">선택 상품 금액 ${won(goods)}</div>
+      <div class="cart-summary-row">배송비 ${ship ? won(ship) : "무료"}</div>
+      <div>최종 결제 예정 금액 ${won(pay)}</div>`;
+  }
+}
+
+function startSelectedCheckout() {
+  const selected = new Set(selectedCartIds());
+  const items = cart().filter((item) => selected.has(String(item.id)) && productById(item.id));
+  if (!items.length) {
+    toast("주문할 상품을 선택해 주세요.");
+    return;
+  }
+  rememberCheckoutItems(items.map((item) => ({ id: item.id, qty: item.qty })));
+  location.href = "checkout.html";
+}
+
 function renderCart() {
   const list = document.querySelector("#cart-list");
   if (!list) return;
   const items = cart();
+  const prev = Array.from(document.querySelectorAll("[data-cart-check]")).reduce((set, box) => {
+    if (box.checked) set.add(box.getAttribute("data-cart-check"));
+    return set;
+  }, new Set());
+  const hadBoxes = document.querySelectorAll("[data-cart-check]").length > 0;
   if (!items.length) {
     list.innerHTML = `<p class="empty">장바구니가 비어 있습니다.</p>`;
-    document.querySelector("#cart-total").textContent = "";
+    updateCartTotals();
     return;
   }
-  let sum = 0;
   list.innerHTML = items.map((i) => {
     const p = productById(i.id);
     if (!p) return "";
-    const unit = isWelfare(p) ? copay(p.price) : p.price;
-    const pay = unit * i.qty;
-    sum += pay;
+    const pay = cartLinePay(i);
+    const checked = !hadBoxes || prev.has(String(p.id));
     return `<div class="cart-item">
+      <label class="cart-check"><input type="checkbox" data-cart-check="${esc(p.id)}" ${checked ? "checked" : ""} /></label>
       <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
       <div>
-        <b>${p.name}</b>
+        <b>${esc(p.name)}</b>
         <div>${i.qty}개 · ${isWelfare(p) ? "본인부담" : "판매가"} ${won(pay)}</div>
       </div>
-      <button class="icon-btn" data-remove="${p.id}">✕</button>
+      <button class="icon-btn" data-remove="${esc(p.id)}">✕</button>
     </div>`;
   }).join("");
-  document.querySelector("#cart-total").textContent = "예상 합계 " + won(sum);
+  updateCartTotals();
 }
 
 function applyRegistrationGate() {
@@ -482,6 +600,16 @@ function mountShell(page) {
     if (add) addToCart(add.dataset.add);
     const remove = e.target.closest("[data-remove]");
     if (remove) removeFromCart(remove.dataset.remove);
+    if (e.target.closest("[data-logout]")) {
+      e.preventDefault();
+      logout();
+      return;
+    }
+    if (e.target.closest("[data-cart-checkout]")) {
+      e.preventDefault();
+      startSelectedCheckout();
+      return;
+    }
     if (e.target.closest("[data-open-cart]")) {
       e.preventDefault();
       document.querySelector("#cart-drawer").classList.add("open");
@@ -499,6 +627,16 @@ function mountShell(page) {
     if (e.key !== "Escape") return;
     const drawer = document.querySelector("#cart-drawer");
     if (drawer) drawer.classList.remove("open");
+  });
+  document.body.addEventListener("change", (e) => {
+    if (e.target.id === "cart-select-all") {
+      document.querySelectorAll("[data-cart-check]").forEach((box) => {
+        box.checked = e.target.checked;
+      });
+      updateCartTotals();
+      return;
+    }
+    if (e.target.closest("[data-cart-check]")) updateCartTotals();
   });
 }
 
@@ -828,7 +966,7 @@ function initLogin() {
   const err = getParam("error");
   if (err) showFormError("#login-error", err);
   refreshAuth().then((user) => {
-    if (user) location.href = loginNext();
+    if (user) afterLoginRedirect(user);
   });
   const form = document.querySelector("#login-form");
   if (!form) return;
@@ -841,7 +979,7 @@ function initLogin() {
         body: JSON.stringify({ login: form.login.value, password: form.password.value })
       });
       if (data.token) try { localStorage.setItem("sso_access_token", data.token); } catch (_e) {}
-      location.href = loginNext();
+      afterLoginRedirect(data.user || { isAdmin: false });
     } catch (err) {
       showFormError("#login-error", err.message);
     }
@@ -1097,19 +1235,14 @@ function initAccount() {
     }
     if (user.role === "admin") renderPasswordHelp();
     const logoutBtn = document.querySelector("#logout-btn");
-    if (logoutBtn) {
-      logoutBtn.onclick = async () => {
-        await api("/api/logout", { method: "POST", body: "{}" });
-        try { localStorage.removeItem("sso_access_token"); } catch (_e) {}
-        location.href = "index.html";
-      };
-    }
+    if (logoutBtn) logoutBtn.onclick = () => logout();
     const withdrawBtn = document.querySelector("#withdraw-btn");
     if (withdrawBtn) {
       withdrawBtn.onclick = async () => {
         if (!confirm("정말 탈퇴하시겠습니까? 이름과 연락처는 바로 삭제됩니다.")) return;
         await api("/api/me/withdraw", { method: "POST", body: "{}" });
         try { localStorage.removeItem("sso_access_token"); } catch (_e) {}
+        wipeClientCart();
         location.href = "index.html";
       };
     }
@@ -1284,7 +1417,7 @@ function initCheckout() {
         form.address.value = "";
       }
     }
-    const items = cart();
+    const items = checkoutItems();
     const box = document.querySelector("#checkout-items");
     const totalEl = document.querySelector("#checkout-total");
     if (!items.length) {
@@ -1333,6 +1466,7 @@ function initCheckout() {
       const submitBtn = form.querySelector("button[type=submit]");
       if (submitBtn) submitBtn.disabled = true;
       try {
+        rememberCheckoutItems(items);
         const preorder = await api("/orders/create-preorder/", {
           method: "POST",
           body: JSON.stringify({
@@ -1428,8 +1562,8 @@ function initPaymentSuccess() {
       orderId,
       amount: Number(params.get("amount"))
     })
-  }).then(() => {
-    saveCart([]);
+  }).then((data) => {
+    removeOrderedFromCart(data && data.productIds);
     location.replace("/orders/complete/" + encodeURIComponent(orderId) + "/");
   }).catch((err) => {
     if (result) result.textContent = err.message;
@@ -1499,13 +1633,54 @@ function initSitemap() {
 
 function initAdmin() {
   mountShell("account");
+  const gate = document.querySelector("#admin-gate");
+  const dash = document.querySelector("#admin-dashboard");
+  const showGate = (msg) => {
+    if (dash) dash.hidden = true;
+    if (gate) gate.hidden = false;
+    if (msg) showFormError("#admin-login-error", msg);
+  };
+  const showDash = () => {
+    if (gate) gate.hidden = true;
+    if (dash) dash.hidden = false;
+  };
+  const bindAdminLogin = () => {
+    const form = document.querySelector("#admin-login-form");
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = "1";
+    bindPasswordToggles(form);
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      showFormError("#admin-login-error", "");
+      try {
+        const data = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ login: form.login.value, password: form.password.value })
+        });
+        if (data.token) try { localStorage.setItem("sso_access_token", data.token); } catch (_e) {}
+        if (!isAdminUser(data.user)) {
+          showFormError("#admin-login-error", "관리자 권한이 없는 계정입니다. 헤리움 관리자 계정으로 로그인해 주세요.");
+          return;
+        }
+        location.reload();
+      } catch (err) {
+        showFormError("#admin-login-error", err.message);
+      }
+    };
+  };
   refreshAuth().then(async (user) => {
-    if (!user || user.role !== "admin") {
-      const file = (location.pathname.split("/").pop() || "admin.html");
-      const next = /\.html$/i.test(file) ? file : file + ".html";
-      location.href = "login.html#next=" + encodeURIComponent(next);
+    if (!isAdminUser(user)) {
+      const next = (location.pathname.replace(/^\//, "") || "admin.html");
+      const loginHref = "login.html?next=" + encodeURIComponent(next);
+      const extra = document.querySelector("#admin-login-page");
+      if (extra) extra.href = loginHref;
+      bindAdminLogin();
+      showGate(user
+        ? "관리자 권한이 없는 계정입니다. 헤리움 관리자 계정으로 다시 로그인해 주세요."
+        : "관리자 로그인이 필요합니다.");
       return;
     }
+    showDash();
     const data = await api("/api/admin/products");
     const low = (data.lowStock || []).map((p) => `<li><b>${esc(p.name)}</b> 잔여 ${p.stock}개</li>`).join("");
     document.querySelector("#admin-low").innerHTML = "<h2>재고 10개 이하</h2>" + (low ? "<ul>" + low + "</ul>" : "<p>해당 상품이 없습니다.</p>");
@@ -1519,6 +1694,7 @@ function initAdmin() {
     const form = document.querySelector("#product-form");
     const id = getParam("id");
     if (id && form) form.id.value = id;
+    if (!form) return;
     form.onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -1653,4 +1829,4 @@ async function loadAdminOrders() {
   await render();
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initCheckout, initPaymentSuccess, initPaymentFail, initOrderComplete, initAdmin };
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initCheckout, initPaymentSuccess, initPaymentFail, initOrderComplete, initAdmin, logout };

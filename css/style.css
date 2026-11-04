@@ -797,11 +797,21 @@ ul { list-style: none; }
 }
 .cart-item {
   display: grid;
-  grid-template-columns: 64px 1fr auto;
+  grid-template-columns: auto 64px 1fr auto;
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
+  align-items: center;
 }
+.cart-check { display: flex; align-items: center; }
+.cart-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 4px;
+  font-weight: 600;
+}
+.cart-summary-row { font-size: 14px; font-weight: 500; color: var(--muted, #5b6563); }
 .cart-total { font-size: 20px; font-weight: 800; margin: 16px 0; }
 
 .quiz { display: grid; gap: 10px; }
