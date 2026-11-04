@@ -1245,3 +1245,36 @@ button:focus-visible, a.btn:focus-visible, input:focus-visible, select:focus-vis
   outline: 3px solid #5a3d14;
   outline-offset: 2px;
 }
+#postcode-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+#postcode-layer[hidden] { display: none !important; }
+.postcode-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(43, 38, 31, 0.45);
+}
+.postcode-panel {
+  position: relative;
+  width: min(480px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.postcode-close {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: #f7f5ee;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}

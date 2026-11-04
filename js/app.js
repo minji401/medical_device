@@ -185,23 +185,60 @@ function bindPasswordChecks(input) {
   apply();
 }
 
+function ensurePostcodeLayer() {
+  let wrap = document.getElementById("postcode-layer");
+  if (wrap) return wrap;
+  wrap = document.createElement("div");
+  wrap.id = "postcode-layer";
+  wrap.hidden = true;
+  wrap.innerHTML = `<div class="postcode-dim" data-postcode-close></div>
+    <div class="postcode-panel" role="dialog" aria-modal="true" aria-label="주소 검색">
+      <button type="button" class="postcode-close" data-postcode-close>닫기</button>
+      <div data-postcode-box style="width:100%;height:min(460px,70vh)"></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.addEventListener("click", (e) => {
+    if (e.target.closest("[data-postcode-close]")) wrap.hidden = true;
+  });
+  return wrap;
+}
+
+function fillPostcode(form, data) {
+  const road = data.roadAddress || data.jibunAddress || "";
+  if (form.zipcode) form.zipcode.value = data.zonecode || "";
+  if (form.address_basic) form.address_basic.value = road;
+  else if (form.address) form.address.value = road;
+  if (form.address_detail) form.address_detail.focus();
+}
+
 function bindPostcode(btn, form) {
   if (!btn || !form) return;
   btn.onclick = function () {
     function openMap() {
+      const wrap = ensurePostcodeLayer();
+      const box = wrap.querySelector("[data-postcode-box]");
+      box.innerHTML = "";
+      wrap.hidden = false;
       new window.daum.Postcode({
         oncomplete: function (data) {
-          if (form.zipcode) form.zipcode.value = data.zonecode;
-          if (form.address_basic) form.address_basic.value = data.roadAddress || data.jibunAddress;
-          else if (form.address) form.address.value = data.roadAddress || data.jibunAddress;
-          if (form.address_detail) form.address_detail.focus();
-        }
-      }).open();
+          fillPostcode(form, data);
+          wrap.hidden = true;
+        },
+        onclose: function () {
+          wrap.hidden = true;
+        },
+        width: "100%",
+        height: "100%"
+      }).embed(box);
     }
     if (window.daum && window.daum.Postcode) { openMap(); return; }
     const script = document.createElement("script");
     script.src = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+    script.charset = "UTF-8";
     script.onload = openMap;
+    script.onerror = function () {
+      toast("주소 검색을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    };
     document.body.appendChild(script);
   };
 }

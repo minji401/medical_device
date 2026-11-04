@@ -58,12 +58,13 @@ function securityHeaders(_req, res, next) {
   }
   res.setHeader("Content-Security-Policy", [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://js.tosspayments.com https://t1.daumcdn.net",
+    "script-src 'self' 'unsafe-inline' https://js.tosspayments.com https://t1.daumcdn.net https://t1.kakaocdn.net",
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com",
     "font-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.gstatic.com data:",
-    "img-src 'self' data: https://t1.daumcdn.net https://ssl.daumcdn.net https://postcode.map.daum.net",
-    "connect-src 'self' https://api.tosspayments.com https://event.tosspayments.com https://log.tosspayments.com",
-    "frame-src https://*.tosspayments.com https://pay.toss.im https://payment-gateway.tosspayments.com https://payment-widget.tosspayments.com https://postcode.map.daum.net https://t1.daumcdn.net",
+    "img-src 'self' data: https://t1.daumcdn.net https://ssl.daumcdn.net https://st1.daumcdn.net https://t1.kakaocdn.net https://postcode.map.daum.net https://*.daumcdn.net https://*.kakaocdn.net",
+    "connect-src 'self' https://api.tosspayments.com https://event.tosspayments.com https://log.tosspayments.com https://postcode.map.daum.net https://dapi.kakao.com https://suggest-bar.daum.net https://spi.maps.daum.net https://*.daum.net https://*.kakao.com",
+    "frame-src https://*.tosspayments.com https://pay.toss.im https://payment-gateway.tosspayments.com https://payment-widget.tosspayments.com https://postcode.map.daum.net https://postcode.map.kakao.com https://t1.daumcdn.net https://t1.kakaocdn.net https://*.daum.net https://*.kakao.com",
+    "child-src https://postcode.map.daum.net https://postcode.map.kakao.com https://t1.daumcdn.net https://*.daum.net https://*.kakao.com https://*.tosspayments.com https://pay.toss.im",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "object-src 'none'",
