@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>마이페이지 | 현대 의료기</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="site-header"></div>
+  <section class="page-hero">
+    <div class="wrap">
+      <div class="crumbs">홈 · 마이페이지</div>
+      <h1>마이페이지</h1>
+      <p id="account-lead">계정·배송지와 주문·배송 내역을 한곳에서 확인합니다.</p>
+    </div>
+  </section>
+  <section class="section" style="padding-top:0">
+    <div class="wrap mypage-grid">
+      <article class="panel mypage-card">
+        <div class="account-head">
+          <div>
+            <h2 id="account-name">로그인 확인 중</h2>
+            <p id="account-phone" class="muted"></p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a class="btn btn-outline" id="admin-link" href="admin.html" hidden>관리자</a>
+            <button class="btn btn-outline" id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <form class="form" id="profile-form" style="margin-top:18px">
+          <h3>내 계정 및 배송지</h3>
+          <p class="muted">이름·연락처·기본 배송지를 수정할 수 있습니다. 로그인 이메일은 헤리움과 공통입니다.</p>
+          <label for="profile-email">이메일 (로그인 ID)</label>
+          <input id="profile-email" name="email" type="email" readonly />
+          <label for="profile-name">이름</label>
+          <input id="profile-name" name="name" required placeholder="이름" />
+          <label for="profile-phone">휴대폰 번호</label>
+          <input id="profile-phone" name="phone" required placeholder="010-0000-0000" />
+          <label for="profile-zip">기본 배송지</label>
+          <div class="row" style="margin-bottom:10px">
+            <input id="profile-zip" name="zipcode" placeholder="우편번호" readonly />
+            <button class="btn btn-outline" type="button" id="profile-postcode-btn">주소 검색</button>
+          </div>
+          <input name="address_basic" placeholder="기본주소" readonly />
+          <input name="address_detail" placeholder="상세주소" />
+          <label>현재 비밀번호</label>
+          <input name="currentPassword" type="password" placeholder="비밀번호를 바꿀 때만 입력" autocomplete="current-password" />
+          <label>새 비밀번호</label>
+          <input name="newPassword" type="password" placeholder="영문, 숫자, 특수문자 포함 8~16자" autocomplete="new-password" />
+          <p class="muted">영문, 숫자, 특수문자를 포함하여 8~16자로 입력해 주세요.</p>
+          <p class="form-error" id="profile-error" hidden></p>
+          <button class="btn btn-teal" type="submit" style="margin-top:12px">정보 수정</button>
+        </form>
+        <p style="margin-top:16px"><button class="btn btn-outline" id="withdraw-btn" type="button">회원 탈퇴</button></p>
+        <p class="muted">탈퇴하면 이름·연락처·비밀번호는 바로 삭제하고, 주문·결제 기록은 전자상거래법에 따라 5년간 보관합니다.</p>
+        <div id="password-help"></div>
+      </article>
+
+      <article class="panel mypage-card">
+        <div class="section-head">
+          <div>
+            <h2>주문 / 배송 조회</h2>
+            <p>결제 완료부터 배송 완료까지 상태를 확인할 수 있습니다. <a href="/returns/">교환 및 반품 안내</a></p>
+          </div>
+        </div>
+        <div id="order-list"></div>
+      </article>
+
+      <article class="panel mypage-card">
+        <h2>찜한 상품 / 장바구니</h2>
+        <p class="muted" id="wish-cart-summary">장바구니와 관심 상품을 확인합니다.</p>
+        <p class="mypage-links">
+          <a class="btn btn-outline" href="shop.html" id="cart-summary-link">장바구니 보기</a>
+          <a class="btn btn-outline" href="shop.html" id="wish-summary-link">관심 상품 보기</a>
+        </p>
+      </article>
+
+      <a class="family-banner" href="https://heriumcare.com/main.html" target="_blank" rel="noopener">
+        <strong>영천헤리움 실버케어 요양원 둘러보기 및 입소 상담</strong>
+        <span>헤리움 케어센터 바로가기</span>
+      </a>
+    </div>
+  </section>
+  <div id="site-footer"></div>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>Oncare.initAccount();</script>
+</body>
+</html>

@@ -1,18 +1,20 @@
 const nodemailer = require("nodemailer");
 
-const PASSWORD_RULE = "비밀번호는 8자 이상이며 영문 대문자, 소문자, 숫자, 특수문자를 각각 하나 이상 포함해야 합니다.";
+const PASSWORD_RULE = "영문, 숫자, 특수문자를 포함하여 8~16자로 입력해 주세요.";
+
+function passwordChecks(password) {
+  const value = String(password || "");
+  return {
+    len: value.length >= 8 && value.length <= 16,
+    letter: /[A-Za-z]/.test(value),
+    digit: /\d/.test(value),
+    special: /[^A-Za-z0-9]/.test(value)
+  };
+}
 
 function passwordError(password) {
-  const value = String(password || "");
-  if (
-    value.length < 8
-    || !/[a-z]/.test(value)
-    || !/[A-Z]/.test(value)
-    || !/\d/.test(value)
-    || !/[^A-Za-z0-9]/.test(value)
-  ) {
-    return PASSWORD_RULE;
-  }
+  const checks = passwordChecks(password);
+  if (!checks.len || !checks.letter || !checks.digit || !checks.special) return PASSWORD_RULE;
   return "";
 }
 
@@ -41,4 +43,4 @@ async function sendResetMail(to, link, siteName) {
   });
 }
 
-module.exports = { PASSWORD_RULE, passwordError, mailConfigured, sendResetMail };
+module.exports = { PASSWORD_RULE, passwordError, passwordChecks, mailConfigured, sendResetMail };

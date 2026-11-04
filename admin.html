@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>관리자 | 현대 의료기</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="site-header"></div>
+  <section class="page-hero">
+    <div class="wrap">
+      <h1>주문·상품·회사 정보 관리</h1>
+      <p>주문 배송·취소와 재고 10개 이하 상품을 관리합니다.</p>
+    </div>
+  </section>
+  <section class="section" style="padding-top:0">
+    <div class="wrap">
+      <div class="panel">
+        <h2>주문·배송 관리</h2>
+        <label>상태 필터
+          <select id="admin-order-status"></select>
+        </label>
+        <div id="admin-orders" style="margin-top:12px"></div>
+      </div>
+      <div class="panel" id="admin-low"></div>
+      <form class="panel form" id="product-form" style="margin-top:18px">
+        <h2>상품 등록/수정</h2>
+        <label>상품 ID</label>
+        <input name="id" required />
+        <label>상품명</label>
+        <input name="name" required />
+        <label>판매가</label>
+        <input name="price" type="number" required />
+        <label>할인가</label>
+        <input name="sale_price" type="number" />
+        <label>재고</label>
+        <input name="stock" type="number" value="0" />
+        <label>카테고리</label>
+        <input name="category" />
+        <label class="check"><input type="checkbox" name="is_hygiene_product" /> 위생용품(개봉 시 반품 제한)</label>
+        <label class="check"><input type="checkbox" name="is_active" checked /> 판매 중</label>
+        <button class="btn btn-teal" type="submit">저장</button>
+        <p class="form-error" id="admin-error" hidden></p>
+      </form>
+      <form class="panel form" id="company-form" style="margin-top:18px">
+        <h2>회사 정보</h2>
+        <label>상호명</label>
+        <input name="shop_company_name" placeholder="[상호명]" />
+        <label>대표자</label>
+        <input name="shop_owner" placeholder="[대표자 성명]" />
+        <label>개인정보보호책임자</label>
+        <input name="shop_privacy_officer" placeholder="[책임자 성명]" />
+        <label>사업자번호</label>
+        <input name="shop_biz_no" />
+        <label>통신판매업신고번호</label>
+        <input name="shop_online_sales_no" />
+        <label>의료기기판매업신고번호</label>
+        <input name="shop_medical_sales_no" />
+        <label>고객센터</label>
+        <input name="shop_phone" placeholder="[전화번호]" />
+        <label>이메일</label>
+        <input name="shop_email" placeholder="[고객센터 이메일]" />
+        <label>사업장 소재지</label>
+        <input name="shop_address" placeholder="[사업장 주소 입력]" />
+        <button class="btn btn-teal" type="submit">회사 정보 저장</button>
+      </form>
+    </div>
+  </section>
+  <div id="site-footer"></div>
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>Oncare.initAdmin();</script>
+</body>
+</html>

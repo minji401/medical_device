@@ -6,9 +6,12 @@ const itemSchema = z.object({
 });
 
 const prepareSchema = z.object({
+  order_id: z.string().trim().min(6).max(64).optional(),
   name: z.string().trim().min(2).max(40),
   phone: z.string().trim().min(10).max(20),
   address: z.string().trim().min(5).max(200),
+  zipcode: z.string().trim().max(10).optional().default(""),
+  address_detail: z.string().trim().max(120).optional().default(""),
   memo: z.string().trim().max(1000).optional().default(""),
   amount: z.coerce.number().int().nonnegative().optional(),
   items: z.array(itemSchema).min(1).max(30)

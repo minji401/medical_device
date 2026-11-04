@@ -13,18 +13,18 @@
     <div class="wrap">
       <div class="auth-intro">
         <h1>안전하고 편안한 현대 의료기</h1>
-        <p>아이디와 휴대폰 번호로 가입하면 의료기 주문을 바로 이용할 수 있습니다.<br>헤리움 회원이면 여기서 다시 가입하지 말고 로그인하세요.</p>
+        <p>이메일로 가입하면 헤리움과 같은 회원으로 의료기 주문을 이용할 수 있습니다.<br>이미 헤리움 회원이면 여기서 다시 가입하지 말고 로그인하세요.</p>
       </div>
       <form class="auth-card" id="signup-form">
         <h2>회원가입</h2>
         <p class="auth-help" id="signup-closed" hidden>현재 정식 오픈 준비 중입니다. 문의는 054-334-9986으로 전화해 주세요.</p>
         <div class="auth-field">
-          <label for="signup-username">아이디</label>
+          <label for="signup-email">이메일 (로그인 ID)</label>
           <div class="auth-input">
             <span class="ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 19c1.4-3.2 4-5 7-5s5.6 1.8 7 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 8l8 6 8-6" stroke="currentColor" stroke-width="1.8"/></svg>
             </span>
-            <input id="signup-username" name="username" required minlength="4" maxlength="20" placeholder="아이디" autocomplete="username" />
+            <input id="signup-email" name="email" type="email" required placeholder="예: name@example.com" autocomplete="email" />
           </div>
         </div>
         <div class="auth-field">
@@ -33,9 +33,8 @@
             <span class="ico" aria-hidden="true">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 20V8l6-4 6 4v12" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
             </span>
-            <input id="signup-name" name="name" required placeholder="이름" autocomplete="name" />
+            <input id="signup-name" name="name" required placeholder="구매자 또는 보호자 이름" autocomplete="name" />
           </div>
-          <p class="muted" style="margin-top:6px">주문자 이름입니다. 헤리움 보호자 성함과는 따로 저장됩니다.</p>
         </div>
         <div class="auth-field">
           <label for="signup-phone">휴대폰 번호</label>
@@ -47,29 +46,59 @@
           </div>
         </div>
         <div class="auth-field">
-          <label for="signup-email">이메일 (선택)</label>
-          <div class="auth-input">
-            <span class="ico" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 8l8 6 8-6" stroke="currentColor" stroke-width="1.8"/></svg>
-            </span>
-            <input id="signup-email" name="email" type="email" placeholder="비밀번호 찾기에 사용합니다" autocomplete="email" />
-          </div>
-        </div>
-        <div class="auth-field">
           <label for="signup-password">비밀번호</label>
           <div class="auth-input">
           <span class="ico" aria-hidden="true">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="6" y="10" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 10V8a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.8"/></svg>
           </span>
-          <input id="signup-password" name="password" type="password" required placeholder="대문자, 소문자, 숫자, 특수문자 포함 8자 이상" autocomplete="new-password" />
+          <input id="signup-password" name="password" type="password" required minlength="8" maxlength="16" placeholder="영문, 숫자, 특수문자 포함 8~16자" autocomplete="new-password" />
             <button class="pw-toggle" type="button" data-toggle-pw aria-label="비밀번호 보기">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
           </div>
+          <p class="muted" style="margin-top:6px">영문, 숫자, 특수문자를 포함하여 8~16자로 입력해 주세요.</p>
+          <ul class="pw-checks" id="pw-checks" aria-live="polite">
+            <li data-check="len">8~16자 이내</li>
+            <li data-check="letter">영문 포함</li>
+            <li data-check="digit">숫자 포함</li>
+            <li data-check="special">특수문자(!@#$%^&amp;*) 포함</li>
+          </ul>
         </div>
-        <div class="check check-line" style="margin:8px 0 14px">
+        <div class="auth-field">
+          <label for="signup-password-confirm">비밀번호 확인</label>
+          <div class="auth-input">
+            <span class="ico" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="6" y="10" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 10V8a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.8"/></svg>
+            </span>
+            <input id="signup-password-confirm" name="passwordConfirm" type="password" required minlength="8" maxlength="16" placeholder="비밀번호를 다시 입력해 주세요" autocomplete="new-password" />
+          </div>
+        </div>
+        <div class="auth-field">
+          <label for="signup-zip">기본 배송지 주소 (선택)</label>
+          <div class="row" style="margin-bottom:8px">
+            <div class="auth-input">
+              <input id="signup-zip" name="zipcode" placeholder="우편번호" readonly />
+            </div>
+            <button class="btn btn-outline" type="button" id="signup-postcode-btn">주소 검색</button>
+          </div>
+          <div class="auth-input" style="margin-bottom:8px">
+            <input name="address_basic" placeholder="기본주소" readonly />
+          </div>
+          <div class="auth-input">
+            <input name="address_detail" placeholder="상세주소" />
+          </div>
+        </div>
+        <div class="check check-line" style="margin:8px 0 8px">
+          <input id="signup-age" type="checkbox" name="age14" />
+          <span>[필수] 만 14세 이상입니다.</span>
+        </div>
+        <div class="check check-line" style="margin:8px 0 8px">
           <input id="signup-agree" type="checkbox" name="agree" />
           <span><a href="terms.html">이용약관</a> 및 <a href="privacy.html">개인정보처리방침</a>에 동의합니다.</span>
+        </div>
+        <div class="check check-line" style="margin:8px 0 14px">
+          <input id="signup-marketing" type="checkbox" name="marketing" />
+          <span>[선택] 마케팅 정보 수신에 동의합니다.</span>
         </div>
         <p class="form-error" id="signup-error" hidden></p>
         <button class="auth-submit" type="submit">가입하기</button>

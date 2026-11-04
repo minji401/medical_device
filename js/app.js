@@ -78,7 +78,7 @@ function headerHTML(page) {
     ["shop.html#group=disability", "장애인 용품", "disability"],
     ["guide.html", "이용안내", "guide"],
     ["consult.html", "상담신청", "consult"],
-    ["account.html", "마이페이지", "account"],
+    ["mypage.html", "마이페이지", "account"],
     ["about.html", "사업소 소개", "about"]
   ];
   return `
@@ -118,38 +118,22 @@ function headerHTML(page) {
 
 function footerHTML() {
   return `
-  <footer class="site-footer"><div class="wrap">
-    <div class="footer-grid">
-      <div>
-        <h4>현대 의료기</h4>
-        <p class="foot-phone">054-334-9986</p>
-        <p>평일 09:00–18:00 · 토요일 09:00–13:00<br>점심 12:30–13:30 · 일/공휴일 휴무</p>
+  <footer class="site-footer">
+    <div class="footer-inner wrap">
+      <div class="business-info">
+        <p><strong>상호명:</strong> <span data-company="shop_company_name">[상호명]</span> | <strong>대표자:</strong> <span data-company="shop_owner">[대표자 성명]</span> | <strong>개인정보보호책임자:</strong> <span data-company="shop_privacy_officer">[책임자 성명]</span></p>
+        <p><strong>사업자등록번호:</strong> <span data-company="shop_biz_no">[000-00-00000]</span> | <strong>통신판매업신고:</strong> <span data-company="shop_online_sales_no">[제 0000-0000호]</span></p>
+        <p><strong>사업장 주소:</strong> <span data-company="shop_address">[사업장 주소 입력]</span> | <strong>고객센터:</strong> <span data-company="shop_phone">[전화번호]</span> (평일 09:00~18:00)</p>
+        <p><strong>이메일:</strong> <span data-company="shop_email">[고객센터 이메일]</span></p>
       </div>
-      <div>
-        <h4>이용안내</h4>
-        <p><a href="guide.html">급여·비급여 이용안내</a></p>
-        <p><a href="shop.html">복지용구 · 비급여 · 장애인 용품</a></p>
-        <p><a href="login.html">로그인 · 주문조회</a></p>
-        <p><a href="sitemap.html">사이트맵</a></p>
-        <p><a href="consult.html">방문설치 상담</a></p>
+      <div class="footer-links">
+        <a href="/terms/">이용약관</a> |
+        <a href="/privacy/"><strong>개인정보처리방침</strong></a> |
+        <a href="/returns/">교환 및 반품 안내</a>
       </div>
-      <div>
-        <h4>고객지원</h4>
-        <p>카카오톡 @현대의료기</p>
-        <p>info@example.com</p>
-        <p><a href="https://heriumcare.com/main.html" target="_blank" rel="noopener">헤리움 케어센터</a></p>
-      </div>
-      <div>
-        <h4>사업소</h4>
-        <p>경북 영천시 역전로 16 (완산동 1081-5)<br>대표 강시중<br>팩스 054-334-9985</p>
-      </div>
+      <p class="copyright">© 현대의료기. All rights reserved.</p>
     </div>
-    <div class="legal">
-      상호 현대의료기 | 대표 강시중 | 사업자등록번호 123-45-67890 | 대표전화 054-334-9986<br>
-      헤리움 케어센터와 같은 자리에서 복지용구·일반의료기·장애인 용품을 안내합니다. 상품 가격과 급여 기준은 공단 고시에 따라 달라질 수 있습니다.
-      <p class="legal-links"><a href="privacy.html">개인정보처리방침</a><a href="terms.html">이용약관</a></p>
-    </div>
-  </div></footer>
+  </footer>
   <div class="float-cs">
     <a class="kakao" href="consult.html">카카오 상담</a>
     <a class="call" href="tel:054-334-9986">전화상담</a>
@@ -158,7 +142,7 @@ function footerHTML() {
     <a href="index.html">🏠<br>홈</a>
     <a href="shop.html">🛍️<br>상품군</a>
     <a href="guide.html">📋<br>급여안내</a>
-    <a href="account.html">👤<br>마이</a>
+    <a href="mypage.html">👤<br>마이</a>
     <a href="#" data-open-cart>🛒<br>장바구니</a>
   </nav>
   <div class="cart-drawer" id="cart-drawer">
@@ -175,16 +159,62 @@ function footerHTML() {
 }
 
 function passwordRuleError(password) {
-  if (!password || password.length < 8 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-    return "비밀번호는 8자 이상이며 영문 대문자, 소문자, 숫자, 특수문자를 각각 하나 이상 포함해야 합니다.";
+  const value = String(password || "");
+  if (value.length < 8 || value.length > 16 || !/[A-Za-z]/.test(value) || !/\d/.test(value) || !/[^A-Za-z0-9]/.test(value)) {
+    return "영문, 숫자, 특수문자를 포함하여 8~16자로 입력해 주세요.";
   }
   return "";
 }
 
+function bindPasswordChecks(input) {
+  const list = document.querySelector("#pw-checks");
+  if (!input || !list) return;
+  const apply = () => {
+    const v = input.value || "";
+    const checks = {
+      len: v.length >= 8 && v.length <= 16,
+      letter: /[A-Za-z]/.test(v),
+      digit: /\d/.test(v),
+      special: /[!@#$%^&*]/.test(v)
+    };
+    list.querySelectorAll("[data-check]").forEach((li) => {
+      li.classList.toggle("ok", !!checks[li.dataset.check]);
+    });
+  };
+  input.addEventListener("input", apply);
+  apply();
+}
+
+function bindPostcode(btn, form) {
+  if (!btn || !form) return;
+  btn.onclick = function () {
+    function openMap() {
+      new window.daum.Postcode({
+        oncomplete: function (data) {
+          if (form.zipcode) form.zipcode.value = data.zonecode;
+          if (form.address_basic) form.address_basic.value = data.roadAddress || data.jibunAddress;
+          else if (form.address) form.address.value = data.roadAddress || data.jibunAddress;
+          if (form.address_detail) form.address_detail.focus();
+        }
+      }).open();
+    }
+    if (window.daum && window.daum.Postcode) { openMap(); return; }
+    const script = document.createElement("script");
+    script.src = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+    script.onload = openMap;
+    document.body.appendChild(script);
+  };
+}
+
 async function api(path, opts) {
+  const headers = { "Content-Type": "application/json", "X-Requested-With": "fetch" };
+  try {
+    const token = localStorage.getItem("sso_access_token");
+    if (token) headers.Authorization = "Bearer " + token;
+  } catch (_e) {}
   const res = await fetch(path, Object.assign({
     credentials: "include",
-    headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" }
+    headers
   }, opts || {}));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "요청에 실패했습니다.");
@@ -201,8 +231,11 @@ async function apiMe() {
 }
 
 function loginNext() {
-  const raw = getParam("next") || "account.html";
-  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(raw)) return "account.html";
+  let raw = getParam("next") || "mypage.html";
+  if (/^account\.html/i.test(raw)) raw = "mypage.html";
+  const file = String(raw.split(/[#?]/)[0] || "");
+  if (/^[a-z0-9_-]+$/i.test(file)) raw = file + ".html" + raw.slice(file.length);
+  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(raw)) return "mypage.html";
   return raw;
 }
 
@@ -215,17 +248,36 @@ function showFormError(id, msg) {
 
 function statusLabel(status) {
   return {
-    PENDING: "결제 대기",
-    PAID: "결제 완료",
-    PREPARING: "상품 준비",
-    SHIPPED: "배송 중",
-    DELIVERED: "배송 완료",
-    CANCELED: "취소",
-    received: "접수",
-    reviewing: "확인 중",
-    confirmed: "안내 완료",
-    cancelled: "취소"
+    READY: "결제대기",
+    PENDING: "결제대기",
+    PAID: "결제완료",
+    PREPARING: "배송준비중",
+    SHIPPING: "배송중",
+    SHIPPED: "배송중",
+    DELIVERED: "배송완료",
+    CANCEL_REQUESTED: "취소요청",
+    CANCELLED: "취소/환불",
+    CANCELED: "취소/환불",
+    received: "결제대기",
+    reviewing: "배송준비중",
+    confirmed: "배송준비중",
+    cancelled: "취소/환불"
   }[status] || status;
+}
+
+function statusClass(status) {
+  return {
+    READY: "is-prep",
+    PENDING: "is-prep",
+    PAID: "is-paid",
+    PREPARING: "is-prep",
+    SHIPPING: "is-ship",
+    SHIPPED: "is-ship",
+    DELIVERED: "is-done",
+    CANCEL_REQUESTED: "is-cancel",
+    CANCELLED: "is-cancel",
+    CANCELED: "is-cancel"
+  }[status] || "is-prep";
 }
 
 function esc(s) {
@@ -240,7 +292,7 @@ function refreshAuth() {
     const link = document.querySelector("#auth-link");
     if (link) {
       if (user) {
-        link.href = "account.html";
+        link.href = "mypage.html";
         link.title = "마이페이지";
         link.textContent = user.name + "님";
       } else {
@@ -367,6 +419,13 @@ function mountShell(page) {
   const footer = document.querySelector("#site-footer");
   if (header) header.innerHTML = headerHTML(page);
   if (footer) footer.innerHTML = footerHTML();
+  api("/api/company").then((data) => {
+    const company = (data && data.company) || {};
+    document.querySelectorAll("[data-company]").forEach((el) => {
+      const value = company[el.getAttribute("data-company")];
+      if (value) el.textContent = value;
+    });
+  }).catch(() => {});
   updateCartCount();
   renderCart();
   refreshAuth();
@@ -398,6 +457,11 @@ function mountShell(page) {
       const nav = document.querySelector("#main-nav");
       nav.style.display = nav.style.display === "block" ? "" : "block";
     }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const drawer = document.querySelector("#cart-drawer");
+    if (drawer) drawer.classList.remove("open");
   });
 }
 
@@ -574,12 +638,44 @@ function initProduct() {
           <button class="btn btn-outline btn-lg" id="add-btn">장바구니</button>
           <a class="btn btn-teal btn-lg" href="consult.html?item=${encodeURIComponent(p.name)}">바로 상담</a>
         </div>
+        <div id="stock-note"></div>
+        <div class="policy-box">
+          <h3>교환·환불 안내</h3>
+          <p>전자상거래법에 따라 상품 수령 후 7일 이내 청약철회(반품)가 가능합니다. 단순 변심 반품의 배송비는 고객 부담, 제품 하자의 배송비는 판매자가 부담합니다.</p>
+          <p class="hygiene-note" hidden>피부 접촉·멸균 소모품·위생용품은 포장 개봉 시 단순 변심 반품이 제한됩니다.</p>
+        </div>
       </div>
     </div>`;
   let qty = 1;
   box.querySelector("#plus").onclick = () => { qty += 1; box.querySelector("#qty").textContent = qty; };
   box.querySelector("#minus").onclick = () => { qty = Math.max(1, qty - 1); box.querySelector("#qty").textContent = qty; };
   box.querySelector("#add-btn").onclick = () => addToCart(p.id, qty);
+  api("/api/products/" + encodeURIComponent(p.id)).then((data) => {
+    const row = data.product || {};
+    const stock = Number(row.stock);
+    const note = box.querySelector("#stock-note");
+    const add = box.querySelector("#add-btn");
+    if (row.isHygiene) {
+      const hy = box.querySelector(".hygiene-note");
+      if (hy) hy.hidden = false;
+    }
+    if (stock === 0) {
+      note.innerHTML = '<p class="soldout">품절</p>';
+      add.disabled = true;
+      add.textContent = "품절";
+    } else if (stock <= 10) {
+      note.innerHTML = '<p class="low-stock">품절 임박: 잔여 ' + stock + "개 남음</p>";
+    }
+    refreshAuth().then((user) => {
+      if (user && user.role === "admin") {
+        const link = document.createElement("a");
+        link.href = "admin.html#id=" + encodeURIComponent(p.id);
+        link.className = "admin-edit";
+        link.textContent = "수정하기";
+        box.querySelector(".buybox").appendChild(link);
+      }
+    });
+  }).catch(() => {});
   const related = PRODUCTS.filter((x) => x.category === p.category && x.id !== p.id);
   renderCards("#related", (related.length ? related : PRODUCTS.filter((x) => productGroup(x) === g && x.id !== p.id)).slice(0, 4));
 }
@@ -703,10 +799,11 @@ function initLogin() {
     e.preventDefault();
     showFormError("#login-error", "");
     try {
-      await api("/api/login", {
+      const data = await api("/api/login", {
         method: "POST",
         body: JSON.stringify({ login: form.login.value, password: form.password.value })
       });
+      if (data.token) try { localStorage.setItem("sso_access_token", data.token); } catch (_e) {}
       location.href = loginNext();
     } catch (err) {
       showFormError("#login-error", err.message);
@@ -723,12 +820,22 @@ function initSignup() {
   });
   const form = document.querySelector("#signup-form");
   if (!form) return;
+  bindPasswordChecks(form.password);
+  bindPostcode(document.querySelector("#signup-postcode-btn"), form);
   form.onsubmit = async (e) => {
     e.preventDefault();
     showFormError("#signup-error", "");
+    if (form.password.value !== form.passwordConfirm.value) {
+      showFormError("#signup-error", "비밀번호가 일치하지 않습니다.");
+      return;
+    }
     const rule = passwordRuleError(form.password.value);
     if (rule) {
       showFormError("#signup-error", rule);
+      return;
+    }
+    if (!form.age14 || !form.age14.checked) {
+      showFormError("#signup-error", "만 14세 이상만 가입할 수 있습니다.");
       return;
     }
     if (!form.agree.checked) {
@@ -736,16 +843,22 @@ function initSignup() {
       return;
     }
     try {
-      await api("/api/signup", {
+      const data = await api("/api/signup", {
         method: "POST",
         body: JSON.stringify({
-          username: form.username.value,
+          email: form.email.value,
           name: form.name.value,
           phone: form.phone.value,
-          email: form.email.value,
-          password: form.password.value
+          age14: true,
+          marketing: form.marketing ? form.marketing.checked : false,
+          password: form.password.value,
+          passwordConfirm: form.passwordConfirm.value,
+          zipcode: form.zipcode ? form.zipcode.value : "",
+          address_basic: form.address_basic ? form.address_basic.value : "",
+          address_detail: form.address_detail ? form.address_detail.value : ""
         })
       });
+      if (data.token) try { localStorage.setItem("sso_access_token", data.token); } catch (_e) {}
       location.href = loginNext();
     } catch (err) {
       showFormError("#signup-error", err.message);
@@ -930,27 +1043,61 @@ function initAccount() {
   mountShell("account");
   refreshAuth().then(async (user) => {
     if (!user) {
-      location.href = "login.html#next=account.html";
+      location.href = "login.html#next=mypage.html";
       return;
     }
     document.querySelector("#account-name").textContent = (user.name || user.username || "회원") + "님";
     const bits = [];
-    if (user.username) bits.push("아이디 " + user.username);
+    if (user.email) bits.push(user.email);
+    else if (user.username) bits.push(user.username);
     bits.push(user.phone || "휴대폰 미등록");
     if (user.role === "admin") bits.push("관리자");
     document.querySelector("#account-phone").textContent = bits.join(" · ");
+    const adminLink = document.querySelector("#admin-link");
+    if (adminLink && user.role === "admin") {
+      adminLink.hidden = false;
+      if (user.adminPath) adminLink.href = user.adminPath;
+    }
     if (user.role === "admin") renderPasswordHelp();
-    document.querySelector("#logout-btn").onclick = async () => {
-      await api("/api/logout", { method: "POST", body: "{}" });
-      location.href = "index.html";
-    };
+    const logoutBtn = document.querySelector("#logout-btn");
+    if (logoutBtn) {
+      logoutBtn.onclick = async () => {
+        await api("/api/logout", { method: "POST", body: "{}" });
+        try { localStorage.removeItem("sso_access_token"); } catch (_e) {}
+        location.href = "index.html";
+      };
+    }
+    const withdrawBtn = document.querySelector("#withdraw-btn");
+    if (withdrawBtn) {
+      withdrawBtn.onclick = async () => {
+        if (!confirm("정말 탈퇴하시겠습니까? 이름과 연락처는 바로 삭제됩니다.")) return;
+        await api("/api/me/withdraw", { method: "POST", body: "{}" });
+        try { localStorage.removeItem("sso_access_token"); } catch (_e) {}
+        location.href = "index.html";
+      };
+    }
+    const cartCount = cart().reduce((n, i) => n + (Number(i.qty) || 1), 0);
+    let wishCount = 0;
+    try { wishCount = (JSON.parse(localStorage.getItem("oncare-wish") || "[]") || []).length; } catch (_e) {}
+    const summary = document.querySelector("#wish-cart-summary");
+    if (summary) {
+      summary.textContent = "장바구니 " + cartCount + "개 · 관심 상품 " + wishCount + "개";
+    }
+    const cartLink = document.querySelector("#cart-summary-link");
+    if (cartLink) cartLink.textContent = "장바구니 보기 (" + cartCount + ")";
+    const wishLink = document.querySelector("#wish-summary-link");
+    if (wishLink) wishLink.textContent = "관심 상품 보기 (" + wishCount + ")";
     const profile = document.querySelector("#profile-form");
     if (profile) {
-      profile.username.value = user.username || "";
+      if (profile.username) profile.username.value = user.username || "";
       profile.name.value = user.name || "";
       profile.phone.value = user.phone || "";
-      profile.email.value = user.email || "";
-      profile.address.value = user.address || "";
+      if (profile.email) profile.email.value = user.email || "";
+      if (profile.address) profile.address.value = user.address || "";
+      if (profile.zipcode) profile.zipcode.value = user.zipcode || "";
+      if (profile.address_basic) profile.address_basic.value = user.addressBasic || "";
+      if (profile.address_detail) profile.address_detail.value = user.addressDetail || "";
+      bindPostcode(document.querySelector("#profile-postcode-btn"), profile);
       profile.onsubmit = async (e) => {
         e.preventDefault();
         showFormError("#profile-error", "");
@@ -966,8 +1113,11 @@ function initAccount() {
             body: JSON.stringify({
               name: profile.name.value,
               phone: profile.phone.value,
-              email: profile.email.value,
-              address: profile.address.value,
+              email: profile.email ? profile.email.value : user.email,
+              address: profile.address ? profile.address.value : "",
+              zipcode: profile.zipcode ? profile.zipcode.value : "",
+              address_basic: profile.address_basic ? profile.address_basic.value : "",
+              address_detail: profile.address_detail ? profile.address_detail.value : "",
               currentPassword: profile.currentPassword.value,
               password: profile.newPassword.value
             })
@@ -984,38 +1134,60 @@ function initAccount() {
     try {
       const data = await api("/api/orders");
       const box = document.querySelector("#order-list");
+      if (!box) return;
       if (!data.orders.length) {
-        box.innerHTML = `<p class="empty">아직 접수된 주문이 없습니다.</p>`;
+        box.innerHTML = `<div class="empty-cta"><p class="empty">아직 주문하신 내역이 없습니다.</p><a class="btn btn-teal" href="shop.html">상품 보러가기</a></div>`;
         return;
       }
       box.innerHTML = data.orders.map((o) => {
+        const first = (o.items || [])[0];
+        const extra = Math.max(0, (o.items || []).length - 1);
+        const title = first
+          ? esc(first.name) + " × " + (first.qty || 1) + (extra ? " 외 " + extra + "건" : "")
+          : (o.type === "consult" ? "상담 신청" : "주문");
         const items = (o.items || []).map((i) => `${esc(i.name)} × ${i.qty}`).join("<br>");
         const topics = (o.topics || []).map(esc).join(", ");
+        const canTrack = (o.status === "SHIPPING" || o.status === "SHIPPED" || o.status === "DELIVERED") && (o.trackingUrl || o.trackingNumber);
+        const track = canTrack
+          ? `<a class="btn btn-outline" href="${esc(o.trackingUrl || ("https://tracker.delivery/#/kr.cjlogistics/" + encodeURIComponent(o.trackingNumber)))}" target="_blank" rel="noopener">배송조회</a>`
+          : (o.status === "SHIPPING" || o.status === "PREPARING" ? `<span class="muted">운송장 준비 중</span>` : "");
+        const receipt = o.receiptUrl
+          ? `<a class="btn btn-outline" href="${esc(o.receiptUrl)}" target="_blank" rel="noopener">영수증 보기</a>`
+          : "";
         const admin = user.role === "admin"
           ? `<div class="order-admin">
               <label>상태
                 <select data-order-status="${esc(o.id)}">
-                  ${["PENDING", "PAID", "PREPARING", "SHIPPED", "DELIVERED", "CANCELED"].map((s) =>
+                  ${["READY", "PAID", "PREPARING", "SHIPPING", "DELIVERED", "CANCEL_REQUESTED", "CANCELLED"].map((s) =>
                     `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
                   ).join("")}
                 </select>
               </label>
             </div>`
           : "";
-        return `<article class="panel order-card">
+        return `<article class="panel order-card" id="order-${esc(o.id)}">
           <div class="order-top">
             <div>
               <b>${esc(o.number)}</b>
-              <span class="status-pill">${statusLabel(o.status)}</span>
+              <span class="status-pill ${statusClass(o.status)}">${statusLabel(o.status)}</span>
             </div>
             <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
           </div>
-          <p>${o.type === "consult" ? "상담 신청" : "상품 주문"} · ${esc(o.name)} · ${esc(o.phone)}</p>
-          ${o.address ? `<p>${esc(o.address)}</p>` : ""}
+          <p>${title}</p>
+          ${o.total ? `<p><b>${won(o.total)}</b>${o.shippingFee ? ` <small class="muted">(배송비 ${won(o.shippingFee)} 포함)</small>` : ""}</p>` : ""}
+          <p class="muted">${o.type === "consult" ? "상담 신청" : "상품 주문"} · ${esc(o.name || "")}${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
+          ${o.address ? `<p class="muted">${esc(o.address)}</p>` : ""}
           ${topics ? `<p>관심 품목: ${topics}</p>` : ""}
           ${items ? `<p>${items}</p>` : ""}
-          ${o.total ? `<p><b>${won(o.total)}</b></p>` : ""}
           ${o.memo ? `<p class="muted">${esc(o.memo)}</p>` : ""}
+          <div class="order-actions">
+            ${track}
+            ${receipt}
+            <a href="#order-${esc(o.id)}">상세보기</a>
+            ${o.cancel && o.cancel.canCancel ? `<button class="btn btn-outline" type="button" data-cancel-order="${esc(o.id)}">주문 취소</button>` : ""}
+            ${o.cancel && o.cancel.canRequest ? `<button class="btn btn-outline" type="button" data-cancel-request="${esc(o.id)}">취소 요청</button>` : ""}
+          </div>
+          ${o.cancel && o.cancel.message ? `<p class="muted">${esc(o.cancel.message)}</p>` : ""}
           ${admin}
         </article>`;
       }).join("");
@@ -1028,6 +1200,25 @@ function initAccount() {
             body: JSON.stringify({ status: sel.value })
           });
           toast("상태를 바꿨습니다.");
+        } catch (err) {
+          toast(err.message);
+        }
+      };
+      box.onclick = async (e) => {
+        const cancelBtn = e.target.closest("[data-cancel-order]");
+        const requestBtn = e.target.closest("[data-cancel-request]");
+        const btn = cancelBtn || requestBtn;
+        if (!btn) return;
+        const id = btn.getAttribute("data-cancel-order") || btn.getAttribute("data-cancel-request");
+        const ask = cancelBtn ? "이 주문을 취소할까요? 결제된 경우 승인이 취소됩니다." : "배송이 시작된 주문입니다. 취소 요청만 접수됩니다. 진행할까요?";
+        if (!confirm(ask)) return;
+        try {
+          const result = await api("/api/orders/" + encodeURIComponent(id) + "/cancel", {
+            method: "POST",
+            body: JSON.stringify({ request: Boolean(requestBtn) })
+          });
+          toast(result.message || "처리되었습니다.");
+          location.reload();
         } catch (err) {
           toast(err.message);
         }
@@ -1046,7 +1237,9 @@ function initCheckout() {
       if (user) {
         form.name.value = user.name || "";
         form.phone.value = user.phone || "";
-        form.address.value = user.address || "";
+        if (form.zipcode) form.zipcode.value = user.zipcode || "";
+        form.address.value = user.addressBasic || user.address || "";
+        if (form.address_detail) form.address_detail.value = user.addressDetail || "";
       } else {
         form.setAttribute("autocomplete", "off");
         form.name.value = "";
@@ -1074,54 +1267,58 @@ function initCheckout() {
         <div><b>${esc(p.name)}</b><div>${i.qty}개 · ${won(pay)}</div></div>
       </div>`;
     }).join("");
-    totalEl.textContent = "결제 금액 " + won(sum);
-    let prepared = null;
+    const ship = sum >= 50000 ? 0 : 3000;
+    totalEl.innerHTML = `상품 ${won(sum)} · 배송비 ${ship ? won(ship) : "무료"}<br><b>결제 금액 ${won(sum + ship)}</b>`;
+    bindPostcode(document.querySelector("#postcode-btn"), form);
     form.onsubmit = async (e) => {
       e.preventDefault();
       showFormError("#checkout-error", "");
+      const submitBtn = form.querySelector("button[type=submit]");
+      if (submitBtn) submitBtn.disabled = true;
       try {
-        if (!prepared) {
-          prepared = await api("/api/payments/prepare", {
-            method: "POST",
-            body: JSON.stringify({
-              name: form.name.value,
-              phone: form.phone.value,
-              address: form.address.value,
-              memo: form.memo.value,
-              amount: sum,
-              items
-            })
-          });
-          await loadToss();
-          const widgets = TossPayments(prepared.clientKey).widgets({ customerKey: prepared.customerKey });
-          await widgets.setAmount({ currency: "KRW", value: prepared.amount });
-          document.querySelector("#payment-box").hidden = false;
-          await widgets.renderPaymentMethods({ selector: "#payment-method" });
-          await widgets.renderAgreement({ selector: "#agreement" });
-          prepared.widgets = widgets;
-          form.querySelector("button[type=submit]").textContent = "결제창 열기";
-          return;
+        const preorder = await api("/orders/create-preorder/", {
+          method: "POST",
+          body: JSON.stringify({
+            items,
+            recipient_name: form.name.value,
+            recipient_phone: form.phone.value,
+            postal_code: form.zipcode ? form.zipcode.value : "",
+            address: form.address.value,
+            detail_address: form.address_detail ? form.address_detail.value : "",
+            delivery_memo: form.memo.value
+          })
+        });
+        if (!preorder || !preorder.success || !preorder.order_id) {
+          throw new Error("가주문을 만들지 못했습니다.");
         }
-        await prepared.widgets.requestPayment({
-          orderId: prepared.orderId,
-          orderName: prepared.orderName,
-          successUrl: prepared.successUrl,
-          failUrl: prepared.failUrl,
-          customerName: prepared.customerName,
-          customerMobilePhone: prepared.customerMobilePhone
+        const cfg = await fetch("/api/public-config", { credentials: "include" }).then((res) => res.json());
+        const clientKey = cfg.tossClientKey || "";
+        if (!clientKey) throw new Error("카드 결제를 열려면 토스페이먼츠 키가 필요합니다.");
+        await loadTossV1();
+        const origin = location.origin;
+        const phone = String(form.phone.value || "").replace(/\D/g, "");
+        await window.TossPayments(clientKey).requestPayment("카드", {
+          amount: preorder.amount,
+          orderId: preorder.order_id,
+          orderName: preorder.order_name,
+          successUrl: origin + "/orders/payment/success/",
+          failUrl: origin + "/orders/payment/fail/",
+          customerName: form.name.value,
+          customerMobilePhone: phone
         });
       } catch (err) {
+        if (submitBtn) submitBtn.disabled = false;
         showFormError("#checkout-error", err.message);
       }
     };
   });
 }
 
-function loadToss() {
+function loadTossV1() {
   if (window.TossPayments) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://js.tosspayments.com/v2/standard";
+    script.src = "https://js.tosspayments.com/v1/payment";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("결제 창을 불러오지 못했습니다."));
     document.head.appendChild(script);
@@ -1131,21 +1328,18 @@ function loadToss() {
 function initPaymentSuccess() {
   mountShell("shop");
   const params = new URLSearchParams(location.search);
+  const orderId = params.get("orderId") || "";
   const result = document.querySelector("#payment-result");
   api("/api/payments/confirm", {
     method: "POST",
     body: JSON.stringify({
       paymentKey: params.get("paymentKey") || "",
-      orderId: params.get("orderId") || "",
+      orderId,
       amount: Number(params.get("amount"))
     })
-  }).then((data) => {
+  }).then(() => {
     saveCart([]);
-    if (result) {
-      result.textContent = data.status === "PAID"
-        ? "결제가 확인되었습니다. 주문번호 " + (params.get("orderId") || "")
-        : "가상계좌가 발급되었습니다. 입금이 확인되면 결제가 완료됩니다.";
-    }
+    location.replace("/orders/complete/" + encodeURIComponent(orderId) + "/");
   }).catch((err) => {
     if (result) result.textContent = err.message;
   });
@@ -1154,12 +1348,18 @@ function initPaymentSuccess() {
 function initPaymentFail() {
   mountShell("shop");
   const params = new URLSearchParams(location.search);
-  const orderId = params.get("orderId") || "";
-  if (!orderId) return;
-  api("/api/payments/fail", {
-    method: "POST",
-    body: JSON.stringify({ orderId })
-  }).catch(() => {});
+  const result = document.querySelector("#payment-result");
+  const message = params.get("message");
+  if (result && message) result.textContent = message;
+}
+
+function initOrderComplete() {
+  mountShell("shop");
+  saveCart([]);
+  const parts = location.pathname.split("/").filter(Boolean);
+  const orderId = decodeURIComponent(parts[parts.length - 1] || "");
+  const el = document.querySelector("#complete-order-id");
+  if (el && orderId) el.textContent = "주문번호 " + orderId;
 }
 
 function initAbout() {
@@ -1180,9 +1380,10 @@ function initSitemap() {
     ["signup.html", "회원가입"],
     ["find-id.html", "아이디 찾기"],
     ["find-password.html", "비밀번호 찾기"],
-    ["account.html", "마이페이지 · 주문조회"],
+    ["mypage.html", "마이페이지 · 주문조회"],
     ["privacy.html", "개인정보처리방침"],
-    ["terms.html", "이용약관"]
+    ["terms.html", "이용약관"],
+    ["returns.html", "교환 및 반품 안내"]
   ];
   const pageList = pages.map(([href, label]) => `<li><a href="${href}">${esc(label)}</a></li>`).join("");
   const groupCols = GROUPS.map((g) => {
@@ -1205,4 +1406,160 @@ function initSitemap() {
   applyRegistrationGate();
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initCheckout, initPaymentSuccess, initPaymentFail };
+function initAdmin() {
+  mountShell("account");
+  refreshAuth().then(async (user) => {
+    if (!user || user.role !== "admin") {
+      const file = (location.pathname.split("/").pop() || "admin.html");
+      const next = /\.html$/i.test(file) ? file : file + ".html";
+      location.href = "login.html#next=" + encodeURIComponent(next);
+      return;
+    }
+    const data = await api("/api/admin/products");
+    const low = (data.lowStock || []).map((p) => `<li><b>${esc(p.name)}</b> 잔여 ${p.stock}개</li>`).join("");
+    document.querySelector("#admin-low").innerHTML = "<h2>재고 10개 이하</h2>" + (low ? "<ul>" + low + "</ul>" : "<p>해당 상품이 없습니다.</p>");
+    const companyData = await api("/api/admin/company").catch(() => ({ company: {} }));
+    const companyForm = document.querySelector("#company-form");
+    if (companyForm && companyData.company) {
+      Object.keys(companyData.company).forEach((key) => {
+        if (companyForm[key]) companyForm[key].value = companyData.company[key];
+      });
+    }
+    const form = document.querySelector("#product-form");
+    const id = getParam("id");
+    if (id && form) form.id.value = id;
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api("/api/admin/products/" + encodeURIComponent(form.id.value), {
+          method: "PATCH",
+          body: JSON.stringify({
+            id: form.id.value,
+            name: form.name.value,
+            price: form.price.value,
+            sale_price: form.sale_price.value,
+            stock: form.stock.value,
+            category: form.category.value,
+            is_hygiene_product: form.is_hygiene_product.checked,
+            is_active: form.is_active.checked
+          })
+        });
+        toast("상품을 저장했습니다.");
+      } catch (err) {
+        showFormError("#admin-error", err.message);
+      }
+    };
+    const company = document.querySelector("#company-form");
+    company.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {};
+      ["shop_company_name", "shop_owner", "shop_privacy_officer", "shop_biz_no", "shop_online_sales_no", "shop_medical_sales_no", "shop_phone", "shop_email", "shop_address"].forEach((key) => {
+        body[key] = company[key].value;
+      });
+      await api("/api/admin/company", { method: "POST", body: JSON.stringify(body) });
+      toast("회사 정보를 저장했습니다.");
+    };
+    await loadAdminOrders();
+  });
+}
+
+async function loadAdminOrders() {
+  const box = document.querySelector("#admin-orders");
+  if (!box) return;
+  const filter = document.querySelector("#admin-order-status");
+  const statuses = ["", "PAID", "PREPARING", "SHIPPING", "DELIVERED", "CANCEL_REQUESTED", "CANCELLED"];
+  async function render() {
+    const status = filter ? filter.value : "";
+    const data = await api("/api/admin/orders" + (status ? "?status=" + encodeURIComponent(status) : ""));
+    const carriers = data.carriers || [];
+    const carrierOpts = carriers.map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join("");
+    if (!data.orders.length) {
+      box.innerHTML = "<p class=\"muted\">해당 주문이 없습니다.</p>";
+      return;
+    }
+    box.innerHTML = data.orders.map((o) => {
+      const items = (o.items || []).map((i) => `${esc(i.name)} × ${i.qty} (${won(i.total || i.unit * i.qty || 0)})`).join("<br>");
+      const shipForm = (o.status === "PAID" || o.status === "PREPARING" || o.status === "SHIPPING")
+        ? `<div class="order-admin" data-ship="${esc(o.id)}">
+            <select data-carrier>${carrierOpts}</select>
+            <input data-tracking placeholder="운송장 번호" value="${esc(o.trackingNumber || "")}" />
+            <button class="btn btn-teal" type="button" data-ship-save="${esc(o.id)}">발송 처리</button>
+          </div>`
+        : "";
+      const cancelBtns = o.status === "CANCEL_REQUESTED"
+        ? `<div class="order-admin">
+            <button class="btn btn-teal" type="button" data-cancel-approve="${esc(o.id)}">취소 승인</button>
+            <input data-reject-reason="${esc(o.id)}" placeholder="거절 사유" />
+            <select data-restore="${esc(o.id)}">
+              <option value="PREPARING">상품준비중으로 복귀</option>
+              <option value="SHIPPING">배송중으로 복귀</option>
+            </select>
+            <button class="btn btn-outline" type="button" data-cancel-reject="${esc(o.id)}">취소 거절</button>
+          </div>`
+        : "";
+      return `<article class="panel order-card">
+        <div class="order-top">
+          <div><b>${esc(o.number)}</b> <span class="status-pill ${statusClass(o.status)}">${statusLabel(o.status)}</span></div>
+          <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
+        </div>
+        <p>주문자 ${esc(o.name || "")} · ${esc(o.phone || "")}</p>
+        <p>수령인 ${esc(o.recipientName || o.name || "")} · ${esc(o.recipientPhone || "")}</p>
+        <p class="muted">[${esc(o.postalCode || "")}] ${esc(o.addressBasic || o.address || "")} ${esc(o.addressDetail || "")}</p>
+        <p>${items || "상품 없음"}</p>
+        <p><b>${won(o.total || 0)}</b>${o.shippingFee ? ` · 배송비 ${won(o.shippingFee)}` : " · 배송비 무료"} ${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
+        ${o.memo ? `<p class="muted">메모: ${esc(o.memo)}</p>` : ""}
+        ${o.cancelReason ? `<p class="muted">거절 사유: ${esc(o.cancelReason)}</p>` : ""}
+        ${shipForm}
+        ${cancelBtns}
+      </article>`;
+    }).join("");
+  }
+  if (filter && !filter.dataset.bound) {
+    filter.dataset.bound = "1";
+    filter.innerHTML = statuses.map((s) => `<option value="${s}">${s ? statusLabel(s) : "전체 주문"}</option>`).join("");
+    filter.onchange = () => render().catch((err) => toast(err.message));
+  }
+  box.onclick = async (e) => {
+    const ship = e.target.closest("[data-ship-save]");
+    const approve = e.target.closest("[data-cancel-approve]");
+    const reject = e.target.closest("[data-cancel-reject]");
+    try {
+      if (ship) {
+        const wrap = ship.closest("[data-ship]");
+        const carrier = wrap.querySelector("[data-carrier]").value;
+        const tracking = wrap.querySelector("[data-tracking]").value;
+        await api("/api/admin/orders/" + encodeURIComponent(ship.getAttribute("data-ship-save")) + "/ship", {
+          method: "POST",
+          body: JSON.stringify({ carrier, tracking_number: tracking })
+        });
+        toast("발송 처리했습니다.");
+        await render();
+      }
+      if (approve) {
+        if (!confirm("토스 결제를 취소하고 재고를 복구할까요?")) return;
+        await api("/api/admin/orders/" + encodeURIComponent(approve.getAttribute("data-cancel-approve")) + "/cancel/approve", { method: "POST", body: "{}" });
+        toast("취소를 승인했습니다.");
+        await render();
+      }
+      if (reject) {
+        const id = reject.getAttribute("data-cancel-reject");
+        const card = reject.closest("article");
+        const reasonEl = card && card.querySelector("[data-reject-reason]");
+        const restoreEl = card && card.querySelector("[data-restore]");
+        const reason = (reasonEl && reasonEl.value) || "";
+        const restore = (restoreEl && restoreEl.value) || "PREPARING";
+        await api("/api/admin/orders/" + encodeURIComponent(id) + "/cancel/reject", {
+          method: "POST",
+          body: JSON.stringify({ reason, restore_status: restore })
+        });
+        toast("취소 요청을 거절했습니다.");
+        await render();
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+  await render();
+}
+
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initCheckout, initPaymentSuccess, initPaymentFail, initOrderComplete, initAdmin };

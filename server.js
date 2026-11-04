@@ -32,14 +32,18 @@ const guard = require("./server/guard");
 const { cleanText } = require("./server/pii");
 const passwords = require("./server/passwords");
 const productStore = require("./server/products");
+const orderUrls = require("./server/orders/urls");
+const adminRoutes = require("./server/admin");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
+const DEBUG = String(process.env.DEBUG || "False").toLowerCase() === "true" || process.env.DEBUG === "1";
 const IS_PROD = process.env.NODE_ENV === "production";
-const SECRET = process.env.SESSION_SECRET || (IS_PROD ? "" : "hyundai-medical-dev-secret");
+const SECRET = process.env.SESSION_SECRET || (DEBUG ? "hyundai-medical-dev-secret" : "");
 const JWT_SECRET = process.env.JWT_SECRET || SECRET;
 const COOKIE = "hm_session";
-if (IS_PROD && !SECRET) {
+const ADMIN_URL_PATH = String(process.env.ADMIN_URL_PATH || "hyundai-control-99").replace(/^\/+|\/+$/g, "") || "hyundai-control-99";
+if (!DEBUG && !SECRET) {
   console.error("SESSION_SECRET이 없습니다. 배포 환경변수에 넣어 주세요.");
   process.exit(1);
 }
@@ -52,7 +56,17 @@ const SITE = (process.env.SITE_URL || "https://hyundaimedi.com").replace(/\/$/, 
 
 const app = express();
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
 app.get("/healthz", (_req, res) => res.type("text").send("ok"));
+app.use(guard.hostAllow);
+app.use((req, res, next) => {
+  if (DEBUG || req.path === "/healthz") return next();
+  const proto = String(req.get("x-forwarded-proto") || req.protocol || "").split(",")[0].trim();
+  if (proto === "https") return next();
+  const host = req.get("host") || "";
+  if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) return next();
+  return res.redirect(301, "https://" + host + req.originalUrl);
+});
 app.use(guard.stagingAuth);
 app.use(guard.securityHeaders);
 app.use(express.json({ limit: "200kb" }));
@@ -60,7 +74,7 @@ app.use(guard.requireFetchHeader);
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "find-id", "find-password", "reset-password", "account", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms", "admin"
+  "login", "signup", "find-id", "find-password", "reset-password", "account", "mypage", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms", "returns"
 ];
 
 app.use("/css", express.static(path.join(ROOT, "css")));
@@ -73,6 +87,23 @@ pages.forEach((name) => {
   app.get("/" + name, send);
 });
 app.get("/", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
+app.get("/mypage/", (_req, res) => res.sendFile(path.join(ROOT, "mypage.html")));
+app.get("/terms/", (_req, res) => res.sendFile(path.join(ROOT, "terms.html")));
+app.get("/privacy/", (_req, res) => res.sendFile(path.join(ROOT, "privacy.html")));
+app.get("/returns/", (_req, res) => res.sendFile(path.join(ROOT, "returns.html")));
+
+function sendAdmin(req, res) {
+  res.sendFile(path.join(ROOT, "admin.html"));
+}
+app.get("/" + ADMIN_URL_PATH, sendAdmin);
+app.get("/" + ADMIN_URL_PATH + ".html", sendAdmin);
+if (DEBUG) {
+  app.get("/admin", sendAdmin);
+  app.get("/admin.html", sendAdmin);
+} else {
+  app.get("/admin", (_req, res) => res.status(404).sendFile(path.join(ROOT, "404.html")));
+  app.get("/admin.html", (_req, res) => res.status(404).sendFile(path.join(ROOT, "404.html")));
+}
 
 function xmlEscape(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -95,12 +126,16 @@ app.get("/robots.txt", (_req, res) => {
       "Allow: /",
       "Disallow: /admin/",
       "Disallow: /admin.html",
+      "Disallow: /" + ADMIN_URL_PATH,
+      "Disallow: /" + ADMIN_URL_PATH + ".html",
       "Disallow: /api/",
       "",
       "User-agent: Yeti",
       "Allow: /",
       "Disallow: /admin/",
       "Disallow: /admin.html",
+      "Disallow: /" + ADMIN_URL_PATH,
+      "Disallow: /" + ADMIN_URL_PATH + ".html",
       "Disallow: /api/",
       "",
       "Sitemap: https://hyundaimedi.com/sitemap.xml",
@@ -244,12 +279,14 @@ function setSession(res, userId) {
     "SameSite=Lax",
     "Max-Age=" + 14 * 24 * 60 * 60
   ];
-  if (IS_PROD) bits.push("Secure");
+  if (!DEBUG) bits.push("Secure");
   res.append("Set-Cookie", bits.join("; "));
 }
 
 function clearSession(res) {
-  res.append("Set-Cookie", COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  const bits = [COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"];
+  if (!DEBUG) bits.push("Secure");
+  res.append("Set-Cookie", bits.join("; "));
 }
 
 function publicUser(user) {
@@ -262,8 +299,36 @@ function publicUser(user) {
     username: user.username || "",
     email: user.email || "",
     address: user.address || "",
+    zipcode: "",
+    addressBasic: "",
+    addressDetail: "",
     role: user.role || "user"
   };
+}
+
+async function publicUserWithShop(user) {
+  const base = publicUser(user);
+  if (!base) return null;
+  const shop = await db.getShopProfile(user.id);
+  if (shop) {
+    base.zipcode = shop.zipcode || "";
+    base.addressBasic = shop.address_basic || "";
+    base.addressDetail = shop.address_detail || "";
+    if (!base.address) {
+      base.address = [shop.zipcode, shop.address_basic, shop.address_detail].filter(Boolean).join(" ").trim();
+    }
+  }
+  if ((user.role || "") === "admin") base.adminPath = "/" + ADMIN_URL_PATH;
+  return base;
+}
+
+function validEmail(raw) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(raw || "").trim());
+}
+
+function joinedAddress(zipcode, basic, detail, fallback) {
+  const text = [zipcode, basic, detail].map((v) => String(v || "").trim()).filter(Boolean).join(" ");
+  return (text || String(fallback || "")).slice(0, 200);
 }
 
 function validUsername(raw) {
@@ -272,14 +337,15 @@ function validUsername(raw) {
 
 function safeNext(raw) {
   const value = String(raw || "").trim();
-  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(value)) return "/account.html";
+  if (!/^[a-z0-9_-]+\.html(?:[#?].*)?$/i.test(value)) return "/mypage.html";
+  if (/^(admin|account)\.html/i.test(value)) return "/mypage.html";
   return "/" + value;
 }
 
 function setOauth(res, payload) {
   const token = sign(Object.assign({ exp: Date.now() + 10 * 60 * 1000 }, payload));
   const bits = ["hm_oauth=" + token, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=600"];
-  if (IS_PROD) bits.push("Secure");
+  if (!DEBUG) bits.push("Secure");
   res.append("Set-Cookie", bits.join("; "));
 }
 
@@ -370,24 +436,27 @@ const loginHits = new Map();
 function tooMany(ip) {
   const now = Date.now();
   const row = loginHits.get(ip) || { n: 0, t: now };
-  if (now - row.t > 10 * 60 * 1000) {
+  if (now - row.t > 30 * 60 * 1000) {
     row.n = 0;
     row.t = now;
   }
   row.n += 1;
   loginHits.set(ip, row);
-  return row.n > 12;
+  return row.n > 5;
 }
 
 app.get("/api/me", async (req, res) => {
-  res.json({ user: publicUser(await currentUser(req)) });
+  res.json({ user: await publicUserWithShop(await currentUser(req)) });
 });
 
 app.patch("/api/me", requireUser, async (req, res) => {
   const name = String(req.body.name || "").trim();
   const phone = normalizePhone(req.body.phone);
-  const address = String(req.body.address || "").trim().slice(0, 200);
-  const email = String(req.body.email || "").trim();
+  const zipcode = String(req.body.zipcode || "").trim().slice(0, 10);
+  const addressBasic = String(req.body.address_basic || req.body.addressBasic || "").trim().slice(0, 120);
+  const addressDetail = String(req.body.address_detail || req.body.addressDetail || "").trim().slice(0, 80);
+  const address = joinedAddress(zipcode, addressBasic, addressDetail, req.body.address);
+  const email = String(req.body.email || "").trim().toLowerCase();
   const password = String(req.body.password || "");
   const current = String(req.body.currentPassword || "");
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
@@ -396,7 +465,7 @@ app.patch("/api/me", requireUser, async (req, res) => {
   if (taken && taken.id !== req.user.id) {
     return res.status(409).json({ error: "이미 사용 중인 휴대폰 번호입니다." });
   }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && !validEmail(email)) {
     return res.status(400).json({ error: "이메일 형식을 확인해 주세요." });
   }
   if (email) {
@@ -414,7 +483,14 @@ app.patch("/api/me", requireUser, async (req, res) => {
     await db.updatePassword(req.user.id, hashPassword(password));
   }
   await db.updateBuyerProfile(req.user.id, { name, phone, address, email });
-  res.json({ user: publicUser(await db.findUserById(req.user.id)) });
+  await db.upsertShopProfile(req.user.id, {
+    recipient_name: name,
+    recipient_phone: phone,
+    zipcode,
+    address_basic: addressBasic,
+    address_detail: addressDetail
+  });
+  res.json({ user: await publicUserWithShop(await db.findUserById(req.user.id)) });
 });
 
 app.post("/api/signup", async (req, res) => {
@@ -422,29 +498,31 @@ app.post("/api/signup", async (req, res) => {
     return res.status(403).json({ error: "현재 정식 오픈 준비 중입니다." });
   }
   const name = String(req.body.name || "").trim();
-  const username = String(req.body.username || "").trim();
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const username = email;
   const phone = normalizePhone(req.body.phone);
-  const email = String(req.body.email || "").trim();
   const password = String(req.body.password || "");
+  const confirm = String(req.body.passwordConfirm || req.body.password_confirm || "");
+  const zipcode = String(req.body.zipcode || "").trim().slice(0, 10);
+  const addressBasic = String(req.body.address_basic || req.body.addressBasic || "").trim().slice(0, 120);
+  const addressDetail = String(req.body.address_detail || req.body.addressDetail || "").trim().slice(0, 80);
+  const address = joinedAddress(zipcode, addressBasic, addressDetail, req.body.address);
   const age14 = req.body.age14 === true || req.body.age14 === "true" || req.body.age14 === "on" || req.body.age14 === 1;
   const marketing = req.body.marketing === true || req.body.marketing === "true" || req.body.marketing === "on";
   if (!age14) return res.status(400).json({ error: "만 14세 이상만 가입할 수 있습니다." });
-  if (!validUsername(username)) return res.status(400).json({ error: "아이디는 4~20자의 영문·숫자·한글만 가능합니다." });
+  if (!validEmail(email)) return res.status(400).json({ error: "이메일을 올바르게 입력해 주세요." });
   if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
+  if (confirm && password !== confirm) {
+    return res.status(400).json({ error: "비밀번호가 일치하지 않습니다." });
+  }
   const policy = security.passwordError(password);
   if (policy) return res.status(400).json({ error: policy });
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: "이메일 형식을 확인해 주세요." });
-  }
-  if (await db.findUserByUsername(username)) {
-    return res.status(409).json({ error: "이미 사용 중인 아이디입니다." });
+  if (await db.findUserByEmail(email) || await db.findUserByUsername(username)) {
+    return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
   }
   if (await db.findUserByPhone(phone)) {
     return res.status(409).json({ error: "이미 가입된 휴대폰 번호입니다." });
-  }
-  if (email && await db.findUserByEmail(email)) {
-    return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
   }
   const user = {
     id: "u_" + crypto.randomUUID(),
@@ -456,14 +534,26 @@ app.post("/api/signup", async (req, res) => {
     role: process.env.ADMIN_PHONE && normalizePhone(process.env.ADMIN_PHONE) === phone ? "admin" : "user",
     heriumLinked: false,
     heriumRelation: "",
-    heriumNote: "herium_username=" + username,
+    heriumNote: "",
     createdAt: new Date().toISOString(),
     age14: true,
     marketing
   };
   await db.createUser(user);
+  if (address) {
+    await db.updateBuyerProfile(user.id, { name, phone, address, email });
+  }
+  if (zipcode || addressBasic || addressDetail) {
+    await db.upsertShopProfile(user.id, {
+      recipient_name: name,
+      recipient_phone: phone,
+      zipcode,
+      address_basic: addressBasic,
+      address_detail: addressDetail
+    });
+  }
   setSession(res, user.id);
-  res.json({ user: publicUser(user), token: issueAccessToken(user) });
+  res.json({ user: await publicUserWithShop(user), token: issueAccessToken(user) });
 });
 
 async function linkHeriumLogin(login, password, sharedUser) {
@@ -532,7 +622,7 @@ app.post("/api/login", async (req, res) => {
     if (passwords.needsRehash(user.passwordHash)) await db.updatePassword(user.id, hashPassword(password));
     await db.clearLoginFailure(user.id);
     setSession(res, user.id);
-    return res.json({ user: publicUser(user), token: issueAccessToken(user) });
+    return res.json({ user: await publicUserWithShop(user), token: issueAccessToken(user) });
   }
   const linked = await linkHeriumLogin(login, password, user);
   if (!linked) {
@@ -544,7 +634,7 @@ app.post("/api/login", async (req, res) => {
   }
   await db.clearLoginFailure(linked.id);
   setSession(res, linked.id);
-  res.json({ user: publicUser(linked), token: issueAccessToken(linked) });
+  res.json({ user: await publicUserWithShop(linked), token: issueAccessToken(linked) });
 });
 
 app.post("/api/find-id", async (req, res) => {
@@ -672,7 +762,10 @@ app.post("/api/reset-password", async (req, res) => {
 });
 
 app.get("/api/public-config", (_req, res) => {
-  res.json({ registrationOpen: guard.registrationOpen() });
+  res.json({
+    registrationOpen: guard.registrationOpen(),
+    tossClientKey: process.env.TOSS_CLIENT_KEY || ""
+  });
 });
 
 app.get("/api/auth/providers", (_req, res) => {
@@ -712,7 +805,7 @@ app.get("/api/auth/:provider/callback", async (req, res) => {
     const user = await upsertSocialUser(provider, profile);
     if (!user) return fail("현재 정식 오픈 준비 중입니다.");
     setSession(res, user.id);
-    res.redirect(payload.next || "/account.html");
+    res.redirect(safeNext(payload.next));
   } catch (err) {
     fail(err.message || "소셜 로그인에 실패했습니다.");
   }
@@ -754,6 +847,7 @@ async function buildItems(rawItems) {
       qty,
       unit,
       total: line,
+      option_text: row.option_text || "",
       hygiene: Boolean(product.isHygiene),
       group: catalog.productGroup(product),
       mode: product.mode
@@ -770,6 +864,7 @@ payments.attach(app, {
   updateBuyerProfile: db.updateBuyerProfile,
   SITE
 });
+orderUrls.attach(app, { buildItems, currentUser, root: ROOT, requireUser });
 
 app.post("/api/orders", async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || "unknown";
@@ -845,24 +940,24 @@ app.get("/api/orders", requireUser, async (req, res) => {
 
 app.patch("/api/orders/:id", requireUser, async (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ error: "관리자만 변경할 수 있습니다." });
-  const allowed = ["PENDING", "PAID", "PREPARING", "SHIPPED", "DELIVERED", "CANCELED"];
+  const allowed = ["READY", "PENDING", "PAID", "PREPARING", "SHIPPING", "SHIPPED", "DELIVERED", "CANCEL_REQUESTED", "CANCELLED", "CANCELED"];
   const status = String(req.body.status || "");
   if (allowed.indexOf(status) < 0) return res.status(400).json({ error: "상태 값이 올바르지 않습니다." });
   const order = await db.findOrderById(req.params.id);
   if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
-  const fulfillment = ["PREPARING", "SHIPPED", "DELIVERED"];
+  const fulfillment = ["PREPARING", "SHIPPING", "SHIPPED", "DELIVERED"];
   if (fulfillment.indexOf(status) >= 0 && order.status !== "PAID" && fulfillment.indexOf(order.status) < 0) {
     return res.status(400).json({ error: "결제 완료 전에 배송 상태로 바꿀 수 없습니다." });
   }
-  if (status === "CANCELED") {
+  if (status === "CANCELED" || status === "CANCELLED") {
     try {
       const canceled = await payments.cancelPaidOrder(order);
-      if (!canceled) await db.updateOrderStatus(order.id, "CANCELED");
+      if (!canceled) await db.updateOrderStatus(order.id, "CANCELLED");
     } catch (_err) {
       return res.status(400).json({ error: "결제 취소가 완료되지 않았습니다." });
     }
-    await db.writeAudit(req.user.id, "order_status", order.number + ":CANCELED", req.ip || "");
-    return res.json({ ok: true, status: "CANCELED" });
+    await db.writeAudit(req.user.id, "order_status", order.number + ":CANCELLED", req.ip || "");
+    return res.json({ ok: true, status: "CANCELLED" });
   }
   const tracking = String(req.body.tracking_number || "").trim();
   const saved = await db.updateOrderStatus(order.id, status, { tracking_number: tracking });
@@ -909,6 +1004,8 @@ app.patch("/api/admin/products/:id", requireAdmin, async (req, res) => {
   res.json({ product: saved });
 });
 
+adminRoutes.attach(app, { requireAdmin });
+
 app.get("/api/admin/products", requireAdmin, async (_req, res) => {
   const products = await productStore.all(catalog);
   res.json({
@@ -940,9 +1037,18 @@ app.get("/api/admin/members", requireAdmin, async (_req, res) => {
   res.json({ totals: users });
 });
 
+app.use((err, _req, res, next) => {
+  if (!err) return next();
+  console.error(err);
+  if (_req.path && String(_req.path).startsWith("/api/")) {
+    return res.status(500).json({ error: "서버 오류가 발생했습니다." });
+  }
+  res.status(500).sendFile(path.join(ROOT, "500.html"));
+});
+
 app.use((req, res) => {
   if (req.path.startsWith("/api/")) return res.status(404).json({ error: "없는 요청입니다." });
-  res.status(404).sendFile(path.join(ROOT, "index.html"));
+  res.status(404).sendFile(path.join(ROOT, "404.html"));
 });
 
 function sleep(ms) {
@@ -966,6 +1072,10 @@ async function startDatabase() {
   }
   console.error("DB 시작 실패. 페이지는 열고 API는 잠시 후 다시 시도합니다.", lastError && lastError.message);
 }
+
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection", reason && reason.message ? reason.message : reason);
+});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("현대 의료기 서버 0.0.0.0:" + PORT);

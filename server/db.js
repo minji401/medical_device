@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { encryptText, decryptText } = require("./pii");
+const orderModels = require("./orders/models");
 
 const DATA_DIR = path.join(__dirname, "data");
 const SQLITE_FILE = path.join(DATA_DIR, "hyundai.db");
@@ -143,32 +144,79 @@ function mapUser(row) {
   };
 }
 
+function mapOrderItemRow(row) {
+  if (!row) return null;
+  const qty = Number(row.quantity) || 1;
+  const unit = Number(row.unit_price) || 0;
+  const subtotal = Number(row.subtotal_amount) || unit * qty;
+  return {
+    id: row.product_id,
+    name: row.product_name,
+    qty,
+    unit,
+    total: subtotal,
+    option_text: row.option_text || "",
+    product_name: row.product_name,
+    unit_price: unit,
+    quantity: qty,
+    subtotal_amount: subtotal
+  };
+}
+
+function jsonItems(items) {
+  return JSON.stringify((items || []).map((item) => ({
+    id: item.id || item.product_id,
+    name: item.name || item.product_name,
+    qty: item.qty || item.quantity,
+    unit: item.unit || item.unit_price,
+    total: item.total || item.subtotal_amount,
+    option_text: item.option_text || "",
+    hygiene: Boolean(item.hygiene || item.isHygiene)
+  })));
+}
+
 function mapOrder(row) {
   if (!row) return null;
+  let items = [];
+  try { items = JSON.parse(row.items || "[]"); } catch (_e) { items = []; }
   return {
     id: row.id,
     number: row.number,
+    orderId: row.number,
     userId: row.user_id,
     type: row.type,
     name: decryptText(row.name),
     phone: decryptText(row.phone),
     address: decryptText(row.address || ""),
-    memo: decryptText(row.memo || ""),
+    memo: decryptText(row.memo || row.delivery_memo || ""),
     topics: JSON.parse(row.topics || "[]"),
-    items: JSON.parse(row.items || "[]"),
-    total: Number(row.total) || 0,
+    items,
+    total: Number(row.total_amount != null ? row.total_amount : row.total) || 0,
+    totalAmount: Number(row.total_amount != null ? row.total_amount : row.total) || 0,
+    orderName: row.order_name || "",
     status: normalizeStatus(row.status),
-    createdAt: row.created_at
+    recipientName: row.recipient_name || decryptText(row.name),
+    recipientPhone: row.recipient_phone || decryptText(row.phone),
+    postalCode: row.postal_code || row.zipcode || "",
+    zipcode: row.zipcode || row.postal_code || "",
+    addressBasic: row.address_basic || decryptText(row.address || ""),
+    addressDetail: row.address_detail || "",
+    paymentKey: row.payment_key || "",
+    paidAt: row.paid_at || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
+    trackingNumber: row.tracking_number || "",
+    carrier: row.carrier || "",
+    receiptUrl: row.receipt_url || "",
+    paymentMethod: row.payment_method || "",
+    shippingFee: Number(row.shipping_fee) || 0,
+    cancelReason: row.cancel_reason || "",
+    previousStatus: row.previous_status || ""
   };
 }
 
 function normalizeStatus(status) {
-  return {
-    received: "PENDING",
-    reviewing: "PREPARING",
-    confirmed: "PREPARING",
-    cancelled: "CANCELED"
-  }[status] || status || "PENDING";
+  return orderModels.normalizeStatus(status);
 }
 
 async function migrateJson() {
@@ -446,6 +494,10 @@ async function findUserByLogin(raw) {
     const byPhone = await findUserByPhone(phone);
     if (byPhone) return byPhone;
   }
+  if (login.indexOf("@") > 0) {
+    const byEmail = await findUserByEmail(login);
+    if (byEmail) return byEmail;
+  }
   return findUserByUsername(login);
 }
 
@@ -546,6 +598,12 @@ async function upsertProduct(row) {
   }
   await exec("INSERT INTO product_stock (product_id, qty) VALUES (?, ?) ON CONFLICT (product_id) DO UPDATE SET qty = excluded.qty", [row.id, row.stock]);
   return findProduct(row.id);
+}
+
+async function getShopProfile(userId) {
+  if (!userId) return null;
+  const rows = await exec("SELECT * FROM shop_profiles WHERE user_id = ? LIMIT 1", [userId]);
+  return rows[0] || null;
 }
 
 async function upsertShopProfile(userId, fields) {
@@ -682,23 +740,56 @@ async function createOrder(order) {
   return order;
 }
 
+async function attachItems(order) {
+  if (!order) return null;
+  const prev = {};
+  (order.items || []).forEach((item) => { prev[item.id] = item; });
+  try {
+    const rows = await exec("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
+    if (rows.length) {
+      order.items = rows.map((row) => {
+        const item = mapOrderItemRow(row);
+        const old = prev[item.id] || {};
+        item.hygiene = Boolean(old.hygiene || old.isHygiene);
+        return item;
+      });
+    }
+  } catch (_e) {}
+  if (!order.orderName) order.orderName = orderModels.orderNameFromItems(order.items);
+  return order;
+}
+
 async function listOrders(opts) {
   const all = opts && opts.all;
   const userId = opts && opts.userId;
-  const rows = all
-    ? await exec("SELECT * FROM orders ORDER BY created_at DESC")
-    : await exec("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", [userId]);
-  return rows.map(mapOrder);
+  const status = String((opts && opts.status) || "").trim();
+  let rows;
+  if (all) {
+    if (status === "SHIPPING") {
+      rows = await exec("SELECT * FROM orders WHERE status IN ('SHIPPING','SHIPPED') ORDER BY created_at DESC");
+    } else if (status === "CANCELLED") {
+      rows = await exec("SELECT * FROM orders WHERE status IN ('CANCELLED','CANCELED') ORDER BY created_at DESC");
+    } else if (status) {
+      rows = await exec("SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC", [status]);
+    } else {
+      rows = await exec("SELECT * FROM orders ORDER BY created_at DESC");
+    }
+  } else {
+    rows = await exec("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", [userId]);
+  }
+  const orders = [];
+  for (const row of rows) orders.push(await attachItems(mapOrder(row)));
+  return orders;
 }
 
 async function findOrderById(id) {
   const rows = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
-  return mapOrder(rows[0]);
+  return attachItems(mapOrder(rows[0]));
 }
 
 async function findOrderByNumber(number) {
   const rows = await exec("SELECT * FROM orders WHERE number = ? LIMIT 1", [number]);
-  return mapOrder(rows[0]);
+  return attachItems(mapOrder(rows[0]));
 }
 
 function mapPayment(row) {
@@ -722,8 +813,128 @@ async function findPaymentByTossOrderId(tossOrderId) {
   return mapPayment(rows[0]);
 }
 
+async function insertOrderItems(tx, orderId, items) {
+  for (const item of items || []) {
+    const qty = Number(item.qty || item.quantity) || 1;
+    const unit = Number(item.unit || item.unit_price) || 0;
+    const subtotal = Number(item.total || item.subtotal_amount) || unit * qty;
+    await tx(
+      "INSERT INTO order_items (id, order_id, product_id, product_name, unit_price, quantity, option_text, subtotal_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        "oi_" + crypto.randomUUID(),
+        orderId,
+        item.id || item.product_id || null,
+        item.name || item.product_name || "상품",
+        unit,
+        qty,
+        item.option_text || "",
+        subtotal
+      ]
+    );
+  }
+}
+
+async function writeReadyOrderRow(tx, order) {
+  const sealed = sealOrder(order);
+  const now = order.createdAt || new Date().toISOString();
+  const orderName = order.orderName || orderModels.orderNameFromItems(order.items);
+  const total = order.total || 0;
+  await tx(
+    `INSERT INTO orders (id, number, user_id, type, name, phone, address, memo, topics, items, total, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      order.id,
+      order.number,
+      order.userId || null,
+      order.type || "order",
+      sealed.name,
+      sealed.phone,
+      sealed.address,
+      sealed.memo,
+      JSON.stringify(order.topics || []),
+      jsonItems(order.items),
+      total,
+      "READY",
+      now
+    ]
+  );
+  await tx(
+    `UPDATE orders SET
+      order_name=?, total_amount=?, shipping_fee=?, recipient_name=?, recipient_phone=?,
+      zipcode=?, postal_code=?, address_basic=?, address_detail=?, delivery_memo=?, updated_at=?
+     WHERE id=?`,
+    [
+      orderName,
+      total,
+      Number(order.shippingFee) || 0,
+      order.name || "",
+      order.phone || "",
+      order.zipcode || "",
+      order.zipcode || "",
+      order.address || "",
+      order.addressDetail || "",
+      order.memo || "",
+      now,
+      order.id
+    ]
+  );
+}
+
+async function createReadyOrder(order, items) {
+  return withTransaction(async (tx) => {
+    await writeReadyOrderRow(tx, Object.assign({}, order, { items: items || order.items }));
+    await insertOrderItems(tx, order.id, items || order.items);
+    return mapOrder({
+      id: order.id,
+      number: order.number,
+      user_id: order.userId || null,
+      type: order.type || "order",
+      name: order.name,
+      phone: order.phone,
+      address: order.address || "",
+      memo: order.memo || "",
+      topics: JSON.stringify(order.topics || []),
+      items: jsonItems(items || order.items),
+      total: order.total || 0,
+      total_amount: order.total || 0,
+      order_name: order.orderName || "",
+      status: "READY",
+      created_at: order.createdAt
+    });
+  });
+}
+
 async function createPendingCheckout(order, items) {
   return withTransaction(async (tx) => {
+    const existing = await tx("SELECT * FROM orders WHERE number = ? LIMIT 1", [order.number]);
+    let orderId = order.id;
+    if (existing.rows[0]) {
+      orderId = existing.rows[0].id;
+      order.id = orderId;
+      await tx(
+        `UPDATE orders SET recipient_name=?, recipient_phone=?, zipcode=?, postal_code=?, address_basic=?, address_detail=?, delivery_memo=?, total=?, total_amount=?, shipping_fee=?, updated_at=? WHERE id=?`,
+        [
+          order.name || "",
+          order.phone || "",
+          order.zipcode || "",
+          order.zipcode || "",
+          order.address || "",
+          order.addressDetail || "",
+          order.memo || "",
+          order.total || 0,
+          order.total || 0,
+          Number(order.shippingFee) || 0,
+          new Date().toISOString(),
+          orderId
+        ]
+      );
+    } else {
+      await writeReadyOrderRow(tx, Object.assign({}, order, { items: items || order.items }));
+      await insertOrderItems(tx, order.id, items || order.items);
+    }
+    const payRows = await tx("SELECT id FROM payments WHERE toss_order_id = ? LIMIT 1", [order.number]);
+    if (payRows.rows[0]) return { stockHeld: false, reused: true };
+
     let held = false;
     for (const item of items) {
       const found = await tx("SELECT qty FROM product_stock WHERE product_id = ?", [item.id]);
@@ -741,42 +952,10 @@ async function createPendingCheckout(order, items) {
       }
       held = true;
     }
-    const sealed = sealOrder(order);
-    await tx(
-      `INSERT INTO orders (id, number, user_id, type, name, phone, address, memo, topics, items, total, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        order.id,
-        order.number,
-        order.userId || null,
-        order.type,
-        sealed.name,
-        sealed.phone,
-        sealed.address,
-        sealed.memo,
-        JSON.stringify(order.topics || []),
-        JSON.stringify(order.items || []),
-        order.total || 0,
-        "PENDING",
-        order.createdAt
-      ]
-    );
-    for (const item of items) {
-      await tx(
-        "INSERT INTO order_items (id, order_id, product_id, product_name, unit_price, quantity) VALUES (?, ?, ?, ?, ?, ?)",
-        ["oi_" + crypto.randomUUID(), order.id, item.id, item.name, item.unit, item.qty]
-      );
-    }
-    try {
-      await tx(
-        "UPDATE orders SET recipient_name=?, recipient_phone=?, zipcode=?, address_basic=?, address_detail=? WHERE id=?",
-        [order.name, order.phone, order.zipcode || "", order.address, order.addressDetail || "", order.id]
-      );
-    } catch (_e) {}
     await tx(
       `INSERT INTO payments (id, order_id, toss_order_id, payment_key, amount, status, method, stock_held, created_at, approved_at)
        VALUES (?, ?, ?, NULL, ?, 'PENDING', NULL, ?, ?, NULL)`,
-      ["pay_" + crypto.randomUUID(), order.id, order.number, order.total || 0, held ? 1 : 0, order.createdAt]
+      ["pay_" + crypto.randomUUID(), orderId, order.number, order.total || 0, held ? 1 : 0, order.createdAt || new Date().toISOString()]
     );
     return { stockHeld: held };
   });
@@ -789,7 +968,7 @@ async function applyPaymentResult(tossOrderId, next) {
     if (!orderRows.rows[0] || !payRows.rows[0]) return null;
     const order = mapOrder(orderRows.rows[0]);
     const payment = mapPayment(payRows.rows[0]);
-    const fulfillment = ["PREPARING", "SHIPPED", "DELIVERED"];
+    const fulfillment = ["PREPARING", "SHIPPING", "SHIPPED", "DELIVERED"];
     let orderStatus = next.orderStatus;
     if (fulfillment.indexOf(order.status) >= 0 && orderStatus === "PAID") orderStatus = order.status;
     if (next.releaseStock && Number(payRows.rows[0].stock_held) === 1) {
@@ -801,7 +980,14 @@ async function applyPaymentResult(tossOrderId, next) {
       }
       await tx("UPDATE payments SET stock_held = 0 WHERE id = ?", [payment.id]);
     }
-    await tx("UPDATE orders SET status = ? WHERE id = ?", [orderStatus, order.id]);
+    const paidAt = orderStatus === "PAID" ? (next.approvedAt || new Date().toISOString()) : null;
+    await tx("UPDATE orders SET status = ?, updated_at = ? WHERE id = ?", [orderStatus, new Date().toISOString(), order.id]);
+    if (next.paymentKey) {
+      try { await tx("UPDATE orders SET payment_key = ? WHERE id = ?", [next.paymentKey, order.id]); } catch (_e) {}
+    }
+    if (paidAt) {
+      try { await tx("UPDATE orders SET paid_at = COALESCE(paid_at, ?) WHERE id = ?", [paidAt, order.id]); } catch (_e) {}
+    }
     await tx(
       "UPDATE payments SET status = ?, payment_key = COALESCE(?, payment_key), method = COALESCE(?, method), approved_at = COALESCE(?, approved_at) WHERE id = ?",
       [next.paymentStatus, next.paymentKey || null, next.method || null, next.approvedAt || null, payment.id]
@@ -810,14 +996,126 @@ async function applyPaymentResult(tossOrderId, next) {
   });
 }
 
+async function finalizePaidOrder(orderNumber, payload) {
+  return withTransaction(async (tx) => {
+    const lock = driver === "pg" ? " FOR UPDATE" : "";
+    const orderRows = await tx("SELECT * FROM orders WHERE number = ?" + lock, [orderNumber]);
+    if (!orderRows.rows[0]) {
+      const err = new Error("주문을 찾을 수 없습니다.");
+      err.status = 404;
+      throw err;
+    }
+    const order = mapOrder(orderRows.rows[0]);
+    if (order.status === "PAID") {
+      return { already: true, id: order.id, status: "PAID", amount: order.total };
+    }
+    if (order.status !== "READY" && order.status !== "PENDING") {
+      const err = new Error("결제할 수 없는 주문 상태입니다.");
+      err.status = 409;
+      throw err;
+    }
+    const itemRows = await tx("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
+    const items = itemRows.rows.length ? itemRows.rows.map(mapOrderItemRow) : (order.items || []);
+    const payRows = await tx("SELECT * FROM payments WHERE toss_order_id = ?" + lock, [orderNumber]);
+    const payment = mapPayment(payRows.rows[0]);
+    const reserved = payment && Number(payRows.rows[0].stock_held) === 1;
+    if (!reserved) {
+      for (const item of items) {
+        const qty = Number(item.qty) || 1;
+        const productId = item.id;
+        if (!productId) continue;
+        await tx("SELECT id FROM products WHERE id = ?" + lock, [productId]);
+        await tx("SELECT product_id FROM product_stock WHERE product_id = ?" + lock, [productId]);
+        const stockHit = await tx(
+          "UPDATE product_stock SET qty = qty - ? WHERE product_id = ? AND qty >= ?",
+          [qty, productId, qty]
+        );
+        const productHit = await tx(
+          "UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?",
+          [qty, productId, qty]
+        );
+        if (stockHit.changes === 0 && productHit.changes === 0) {
+          const counted = await tx("SELECT id FROM products WHERE id = ?", [productId]);
+          const stocked = await tx("SELECT product_id FROM product_stock WHERE product_id = ?", [productId]);
+          if (counted.rows.length || stocked.rows.length) {
+            const err = new Error("재고가 부족한 상품이 있습니다.");
+            err.status = 409;
+            throw err;
+          }
+        }
+      }
+    }
+    const now = new Date().toISOString();
+    const paidAt = payload.approvedAt || now;
+    await tx(
+      "UPDATE orders SET status = ?, payment_key = ?, payment_method = COALESCE(?, payment_method), receipt_url = COALESCE(?, receipt_url), paid_at = COALESCE(paid_at, ?), updated_at = ? WHERE id = ?",
+      ["PAID", payload.paymentKey, payload.method || null, payload.receiptUrl || null, paidAt, now, order.id]
+    );
+    if (payment) {
+      await tx(
+        "UPDATE payments SET status = ?, payment_key = ?, method = COALESCE(?, method), stock_held = 1, approved_at = COALESCE(?, approved_at) WHERE id = ?",
+        ["PAID", payload.paymentKey, payload.method || null, paidAt, payment.id]
+      );
+    } else {
+      await tx(
+        `INSERT INTO payments (id, order_id, toss_order_id, payment_key, amount, status, method, stock_held, created_at, approved_at)
+         VALUES (?, ?, ?, ?, ?, 'PAID', ?, 1, ?, ?)`,
+        [
+          "pay_" + crypto.randomUUID(),
+          order.id,
+          order.number,
+          payload.paymentKey,
+          payload.amount || order.total,
+          payload.method || "",
+          now,
+          paidAt
+        ]
+      );
+    }
+    return { already: false, id: order.id, status: "PAID", amount: order.total };
+  });
+}
+
 async function updateOrderStatus(id, status, extra) {
   const rows = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
   if (!rows[0]) return null;
-  await exec("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
-  if (extra && extra.tracking_number) {
-    try { await exec("UPDATE orders SET tracking_number = ? WHERE id = ?", [extra.tracking_number, id]); } catch (_e) {}
+  extra = extra || {};
+  const sets = ["status = ?", "updated_at = ?"];
+  const vals = [status, new Date().toISOString()];
+  if (extra.tracking_number != null) {
+    sets.push("tracking_number = ?");
+    vals.push(extra.tracking_number);
   }
-  return mapOrder(Object.assign({}, rows[0], { status: status }));
+  if (extra.carrier != null) {
+    sets.push("carrier = ?");
+    vals.push(extra.carrier);
+  }
+  if (extra.cancel_reason != null) {
+    sets.push("cancel_reason = ?");
+    vals.push(extra.cancel_reason);
+  }
+  if (extra.previous_status != null) {
+    sets.push("previous_status = ?");
+    vals.push(extra.previous_status);
+  }
+  vals.push(id);
+  await exec("UPDATE orders SET " + sets.join(", ") + " WHERE id = ?", vals);
+  const next = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
+  return attachItems(mapOrder(next[0] || Object.assign({}, rows[0], { status: status })));
+}
+
+async function clearPurchasedCart(userId, productIds) {
+  if (!userId) return;
+  const ids = (productIds || []).map((id) => String(id || "")).filter(Boolean);
+  try {
+    if (!ids.length) {
+      await exec("DELETE FROM cart_items WHERE user_id = ?", [userId]);
+      return;
+    }
+    for (const productId of ids) {
+      await exec("DELETE FROM cart_items WHERE user_id = ? AND product_id = ?", [userId, productId]);
+    }
+  } catch (_e) {}
 }
 
 async function findNoEmailMember(name, phone) {
@@ -909,10 +1207,13 @@ module.exports = {
   findOrderByNumber,
   findOrderById,
   findPaymentByTossOrderId,
+  createReadyOrder,
   createPendingCheckout,
   applyPaymentResult,
+  finalizePaidOrder,
   listOrders,
   updateOrderStatus,
+  clearPurchasedCart,
   writeAudit,
   findNoEmailMember,
   openPasswordHelp,
@@ -922,6 +1223,7 @@ module.exports = {
   listProducts,
   findProduct,
   upsertProduct,
+  getShopProfile,
   upsertShopProfile,
   withdrawUser,
   companyContent,

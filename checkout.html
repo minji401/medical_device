@@ -29,8 +29,19 @@
         <input name="name" required value="" autocomplete="name" />
         <label>휴대폰 번호</label>
         <input name="phone" required value="" autocomplete="tel" />
-        <label>배송·설치 주소</label>
+        <label>우편번호</label>
+        <div style="display:flex;gap:8px">
+          <input name="zipcode" readonly placeholder="우편번호" />
+          <button class="btn btn-outline" type="button" id="postcode-btn">주소 검색</button>
+        </div>
+        <label>기본 주소</label>
         <input name="address" required value="" autocomplete="street-address" />
+        <label>상세 주소</label>
+        <input name="address_detail" placeholder="동·호수" />
+        <div class="policy-box">
+          <h3>청약철회 안내</h3>
+          <p>수령 후 7일 이내 반품이 가능합니다. 단순 변심 배송비는 고객 부담, 하자 시 판매자 부담입니다. 위생용품은 개봉 후 단순 변심 반품이 제한됩니다.</p>
+        </div>
         <label>요청 사항</label>
         <textarea name="memo" placeholder="방문 시간, 설치 장소, 등급 여부를 적어 주세요."></textarea>
         <p class="form-error" id="checkout-error" hidden></p>
@@ -44,6 +55,8 @@
     </div>
   </section>
   <div id="site-footer"></div>
+  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+  <script src="https://js.tosspayments.com/v1/payment"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
   <script>Oncare.initCheckout();</script>
