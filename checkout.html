@@ -30,7 +30,7 @@
         <label>휴대폰 번호</label>
         <input name="phone" required value="" autocomplete="tel" />
         <label>우편번호</label>
-        <div style="display:flex;gap:8px">
+        <div class="postcode-row">
           <input name="zipcode" readonly placeholder="우편번호" />
           <button class="btn btn-outline" type="button" id="postcode-btn">주소 검색</button>
         </div>
@@ -46,6 +46,7 @@
         <textarea name="memo" placeholder="방문 시간, 설치 장소, 등급 여부를 적어 주세요."></textarea>
         <p class="form-error" id="checkout-error" hidden></p>
         <div id="payment-box" hidden>
+          <h3>결제 수단</h3>
           <div id="payment-method"></div>
           <div id="agreement"></div>
         </div>
@@ -56,7 +57,6 @@
   </section>
   <div id="site-footer"></div>
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-  <script src="https://js.tosspayments.com/v1/payment"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
   <script>Oncare.initCheckout();</script>

@@ -1305,8 +1305,28 @@ function initCheckout() {
       </div>`;
     }).join("");
     const ship = sum >= 50000 ? 0 : 3000;
-    totalEl.innerHTML = `상품 ${won(sum)} · 배송비 ${ship ? won(ship) : "무료"}<br><b>결제 금액 ${won(sum + ship)}</b>`;
+    const previewTotal = sum + ship;
+    totalEl.innerHTML = `상품 ${won(sum)} · 배송비 ${ship ? won(ship) : "무료"}<br><b>결제 금액 ${won(previewTotal)}</b>`;
     bindPostcode(document.querySelector("#postcode-btn"), form);
+    let tossWidgets = null;
+    let tossClientKey = "";
+    fetch("/api/public-config", { credentials: "include" }).then(async (res) => {
+      const cfg = await res.json();
+      tossClientKey = String(cfg.tossClientKey || "").trim();
+      if (!tossClientKey || !isTossWidgetKey(tossClientKey)) return;
+      const payBox = document.querySelector("#payment-box");
+      if (payBox) payBox.hidden = false;
+      await loadTossSdk("widget");
+      const customerKey = user && user.id
+        ? ("u_" + String(user.id).replace(/[^A-Za-z0-9]/g, "")).slice(0, 50)
+        : window.TossPayments.ANONYMOUS;
+      tossWidgets = window.TossPayments(tossClientKey).widgets({ customerKey });
+      await tossWidgets.setAmount({ currency: "KRW", value: previewTotal });
+      await tossWidgets.renderPaymentMethods({ selector: "#payment-method" });
+      await tossWidgets.renderAgreement({ selector: "#agreement" });
+    }).catch((err) => {
+      showFormError("#checkout-error", err.message || "결제 수단을 불러오지 못했습니다.");
+    });
     form.onsubmit = async (e) => {
       e.preventDefault();
       showFormError("#checkout-error", "");
@@ -1328,35 +1348,37 @@ function initCheckout() {
         if (!preorder || !preorder.success || !preorder.order_id) {
           throw new Error("가주문을 만들지 못했습니다.");
         }
-        const cfg = await fetch("/api/public-config", { credentials: "include" }).then((res) => res.json());
-        const clientKey = String(cfg.tossClientKey || "").trim();
-        if (!clientKey) throw new Error("카드 결제를 열려면 토스페이먼츠 키가 필요합니다.");
-        if (/^((test|live)_)?(sk|gsk)_/.test(clientKey)) {
+        if (!tossClientKey) {
+          const cfg = await fetch("/api/public-config", { credentials: "include" }).then((res) => res.json());
+          tossClientKey = String(cfg.tossClientKey || "").trim();
+        }
+        if (!tossClientKey) throw new Error("카드 결제를 열려면 토스페이먼츠 키가 필요합니다.");
+        if (/^((test|live)_)?(sk|gsk)_/.test(tossClientKey)) {
           throw new Error("결제 클라이언트 키가 올바르지 않습니다. 고객센터에 문의해 주세요.");
         }
-        await loadTossV1();
         const origin = location.origin;
         const phone = String(form.phone.value || "").replace(/\D/g, "");
-        const payload = {
-          amount: Number(preorder.amount),
+        const payRequest = {
           orderId: String(preorder.order_id),
           orderName: String(preorder.order_name || "의료기 주문").slice(0, 100),
           successUrl: origin + "/orders/payment/success",
           failUrl: origin + "/orders/payment/fail"
         };
-        if (form.name.value) payload.customerName = String(form.name.value).slice(0, 40);
-        if (/^01[016789]\d{7,8}$/.test(phone)) payload.customerMobilePhone = phone;
+        if (form.name.value) payRequest.customerName = String(form.name.value).slice(0, 40);
+        if (/^01[016789]\d{7,8}$/.test(phone)) payRequest.customerMobilePhone = phone;
         try {
-          await window.TossPayments(clientKey).requestPayment("카드", payload);
+          if (isTossWidgetKey(tossClientKey)) {
+            if (!tossWidgets) throw new Error("결제 수단을 불러오는 중입니다. 잠시 후 다시 눌러 주세요.");
+            await tossWidgets.setAmount({ currency: "KRW", value: Number(preorder.amount) });
+            await tossWidgets.requestPayment(payRequest);
+          } else {
+            await loadTossSdk("window");
+            await window.TossPayments(tossClientKey).requestPayment("카드", Object.assign({
+              amount: Number(preorder.amount)
+            }, payRequest));
+          }
         } catch (tossErr) {
-          const code = tossErr && tossErr.code;
-          if (code === "USER_CANCEL" || code === "PAY_PROCESS_CANCELED") {
-            throw new Error("결제가 취소되었습니다.");
-          }
-          if (code === "NETWORK_ERROR") {
-            throw new Error("결제창 연결이 차단되었습니다. 새로고침 후 다시 시도해 주세요.");
-          }
-          throw tossErr;
+          throw new Error(explainTossError(tossErr));
         }
       } catch (err) {
         if (submitBtn) submitBtn.disabled = false;
@@ -1366,11 +1388,28 @@ function initCheckout() {
   });
 }
 
-function loadTossV1() {
-  if (window.TossPayments) return Promise.resolve();
+function isTossWidgetKey(key) {
+  return /gck_/i.test(String(key || ""));
+}
+
+function explainTossError(err) {
+  const code = err && err.code;
+  if (code === "USER_CANCEL" || code === "PAY_PROCESS_CANCELED") return "결제가 취소되었습니다.";
+  if (code === "NETWORK_ERROR") return "결제창 연결이 차단되었습니다. 새로고침 후 다시 시도해 주세요.";
+  if (code === "COMMON_ERROR") return "결제 설정이 결제 방식과 맞지 않습니다. 토스페이먼츠 클라이언트 키(ck/gck)를 확인해 주세요.";
+  return (err && err.message) || "결제를 시작하지 못했습니다.";
+}
+
+function loadTossSdk(kind) {
+  const src = kind === "widget"
+    ? "https://js.tosspayments.com/v2/standard"
+    : "https://js.tosspayments.com/v1/payment";
+  if (window.TossPayments && (kind !== "widget" || window.TossPayments.ANONYMOUS)) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://js.tosspayments.com/v1/payment";
+    script.src = src;
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("결제 창을 불러오지 못했습니다."));
     document.head.appendChild(script);

@@ -300,6 +300,8 @@ ul { list-style: none; }
   border: 0;
   font-weight: 700;
   font-size: 15px;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 .btn-primary { background: #fff; color: var(--teal-dark); }
 .btn-ghost { background: transparent; color: var(--gold); border: 1px solid rgba(179,139,77,.45); }
@@ -630,6 +632,21 @@ ul { list-style: none; }
 .calc-result b { font-size: 28px; color: var(--teal-dark); }
 
 .form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.postcode-row {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 8px;
+}
+.postcode-row input,
+.postcode-row .auth-input {
+  flex: 1;
+  min-width: 0;
+}
+.postcode-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .checks { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
 .check {
   display: flex;
@@ -1241,6 +1258,8 @@ body:has(.auth-page) .mobile-nav { display: none; }
 .low-stock, .soldout { color: #8a1111; font-weight: 700; }
 .admin-edit { display: inline-block; margin-top: 10px; font-size: 0.86rem; color: #8f6c38; text-decoration: underline; }
 .policy-box { margin-top: 22px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+#payment-box { margin-top: 18px; }
+#payment-method, #agreement { min-height: 48px; }
 button:focus-visible, a.btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 3px solid #5a3d14;
   outline-offset: 2px;
