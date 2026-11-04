@@ -1329,20 +1329,35 @@ function initCheckout() {
           throw new Error("가주문을 만들지 못했습니다.");
         }
         const cfg = await fetch("/api/public-config", { credentials: "include" }).then((res) => res.json());
-        const clientKey = cfg.tossClientKey || "";
+        const clientKey = String(cfg.tossClientKey || "").trim();
         if (!clientKey) throw new Error("카드 결제를 열려면 토스페이먼츠 키가 필요합니다.");
+        if (/^((test|live)_)?(sk|gsk)_/.test(clientKey)) {
+          throw new Error("결제 클라이언트 키가 올바르지 않습니다. 고객센터에 문의해 주세요.");
+        }
         await loadTossV1();
         const origin = location.origin;
         const phone = String(form.phone.value || "").replace(/\D/g, "");
-        await window.TossPayments(clientKey).requestPayment("카드", {
-          amount: preorder.amount,
-          orderId: preorder.order_id,
-          orderName: preorder.order_name,
-          successUrl: origin + "/orders/payment/success/",
-          failUrl: origin + "/orders/payment/fail/",
-          customerName: form.name.value,
-          customerMobilePhone: phone
-        });
+        const payload = {
+          amount: Number(preorder.amount),
+          orderId: String(preorder.order_id),
+          orderName: String(preorder.order_name || "의료기 주문").slice(0, 100),
+          successUrl: origin + "/orders/payment/success",
+          failUrl: origin + "/orders/payment/fail"
+        };
+        if (form.name.value) payload.customerName = String(form.name.value).slice(0, 40);
+        if (/^01[016789]\d{7,8}$/.test(phone)) payload.customerMobilePhone = phone;
+        try {
+          await window.TossPayments(clientKey).requestPayment("카드", payload);
+        } catch (tossErr) {
+          const code = tossErr && tossErr.code;
+          if (code === "USER_CANCEL" || code === "PAY_PROCESS_CANCELED") {
+            throw new Error("결제가 취소되었습니다.");
+          }
+          if (code === "NETWORK_ERROR") {
+            throw new Error("결제창 연결이 차단되었습니다. 새로고침 후 다시 시도해 주세요.");
+          }
+          throw tossErr;
+        }
       } catch (err) {
         if (submitBtn) submitBtn.disabled = false;
         showFormError("#checkout-error", err.message);
