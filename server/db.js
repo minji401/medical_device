@@ -211,6 +211,8 @@ function mapOrder(row) {
     paymentMethod: row.payment_method || "",
     shippingFee: Number(row.shipping_fee) || 0,
     cancelReason: row.cancel_reason || "",
+    cancelledBy: row.cancelled_by || "",
+    cancelledAt: row.cancelled_at || "",
     previousStatus: row.previous_status || ""
   };
 }
@@ -1190,10 +1192,67 @@ async function updateOrderStatus(id, status, extra) {
     sets.push("previous_status = ?");
     vals.push(extra.previous_status);
   }
+  if (extra.cancelled_by != null) {
+    sets.push("cancelled_by = ?");
+    vals.push(extra.cancelled_by);
+  }
+  if (extra.cancelled_at != null) {
+    sets.push("cancelled_at = ?");
+    vals.push(extra.cancelled_at);
+  }
   vals.push(id);
   await exec("UPDATE orders SET " + sets.join(", ") + " WHERE id = ?", vals);
   const next = await exec("SELECT * FROM orders WHERE id = ? LIMIT 1", [id]);
   return attachItems(mapOrder(next[0] || Object.assign({}, rows[0], { status: status })));
+}
+
+async function cancelDirectOrder(orderId, extra) {
+  extra = extra || {};
+  return withTransaction(async (tx) => {
+    const lock = driver === "pg" ? " FOR UPDATE" : "";
+    const orderRows = await tx("SELECT * FROM orders WHERE id = ?" + lock, [orderId]);
+    if (!orderRows.rows[0]) {
+      const err = new Error("주문을 찾을 수 없습니다.");
+      err.status = 404;
+      throw err;
+    }
+    const order = mapOrder(orderRows.rows[0]);
+    if (order.status === "CANCELLED") {
+      const itemRows = await tx("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
+      order.items = itemRows.rows.length ? itemRows.rows.map(mapOrderItemRow) : (order.items || []);
+      return { already: true, order };
+    }
+    const itemRows = await tx("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
+    const items = itemRows.rows.length ? itemRows.rows.map(mapOrderItemRow) : (order.items || []);
+    for (const item of items) {
+      const qty = Number(item.qty || item.quantity) || 1;
+      const productId = item.id || item.product_id;
+      if (!productId) continue;
+      await tx("UPDATE products SET stock = stock + ? WHERE id = ?", [qty, productId]);
+      await tx("UPDATE product_stock SET qty = qty + ? WHERE product_id = ?", [qty, productId]);
+    }
+    const now = new Date().toISOString();
+    await tx(
+      "UPDATE orders SET status = ?, cancel_reason = ?, cancelled_by = ?, cancelled_at = ?, previous_status = ?, updated_at = ? WHERE id = ?",
+      [
+        "CANCELLED",
+        String(extra.reason || "").slice(0, 255),
+        extra.cancelledBy || "ADMIN",
+        now,
+        order.status,
+        now,
+        order.id
+      ]
+    );
+    const payRows = await tx("SELECT * FROM payments WHERE toss_order_id = ?" + lock, [order.number]);
+    if (payRows.rows[0]) {
+      await tx("UPDATE payments SET status = ?, stock_held = 0 WHERE id = ?", ["CANCELED", payRows.rows[0].id]);
+    }
+    const next = await tx("SELECT * FROM orders WHERE id = ?", [order.id]);
+    const mapped = mapOrder(next.rows[0]);
+    mapped.items = items;
+    return { already: false, order: mapped };
+  });
 }
 
 async function clearPurchasedCart(userId, productIds) {
@@ -1205,6 +1264,51 @@ async function clearPurchasedCart(userId, productIds) {
       await exec("DELETE FROM cart_items WHERE user_id = ? AND product_id = ?", [userId, productId]);
     }
   } catch (_e) {}
+}
+
+function mapCartItem(row) {
+  return {
+    id: row.product_id,
+    qty: Math.max(1, Math.min(20, Number(row.quantity) || 1)),
+    option_text: row.option_text || ""
+  };
+}
+
+async function listCartItems(userId) {
+  if (!userId) return [];
+  const rows = await exec(
+    "SELECT product_id, quantity, option_text FROM cart_items WHERE user_id = ? ORDER BY created_at ASC",
+    [userId]
+  );
+  return rows.map(mapCartItem);
+}
+
+async function replaceCartItems(userId, items) {
+  if (!userId) return [];
+  const now = new Date().toISOString();
+  const cleaned = [];
+  const seen = new Set();
+  (items || []).forEach((item) => {
+    const id = String(item.id || item.product_id || "").trim();
+    const qty = Math.max(0, Math.min(20, Number(item.qty || item.quantity) || 0));
+    if (!id || seen.has(id) || qty < 1) return;
+    seen.add(id);
+    cleaned.push({
+      id,
+      qty,
+      option_text: String(item.option_text || "").slice(0, 80)
+    });
+  });
+  await withTransaction(async (tx) => {
+    await tx("DELETE FROM cart_items WHERE user_id = ?", [userId]);
+    for (const row of cleaned) {
+      await tx(
+        "INSERT INTO cart_items (id, user_id, product_id, quantity, option_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ["ci_" + crypto.randomUUID(), userId, row.id, row.qty, row.option_text, now, now]
+      );
+    }
+  });
+  return cleaned;
 }
 
 async function findNoEmailMember(name, phone) {
@@ -1304,7 +1408,10 @@ module.exports = {
   finalizePaidOrder,
   listOrders,
   updateOrderStatus,
+  cancelDirectOrder,
   clearPurchasedCart,
+  listCartItems,
+  replaceCartItems,
   writeAudit,
   findNoEmailMember,
   openPasswordHelp,

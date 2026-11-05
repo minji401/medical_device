@@ -87,6 +87,8 @@ const ORDER_COLUMNS = [
   ["payment_method", "TEXT"],
   ["shipping_fee", "INTEGER DEFAULT 0"],
   ["cancel_reason", "TEXT"],
+  ["cancelled_by", "TEXT"],
+  ["cancelled_at", "TEXT"],
   ["previous_status", "TEXT"],
   ["recipient_name", "TEXT"],
   ["recipient_phone", "TEXT"],
@@ -113,8 +115,12 @@ async function apply(exec, driver) {
   }
   for (const [name, type] of ORDER_COLUMNS) {
     try {
-      if (driver === "pg") await exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS " + name + " " + type);
-      else await exec("ALTER TABLE orders ADD COLUMN " + name + " " + type);
+      if (driver === "pg") {
+        const pgType = name === "cancelled_at" ? "TIMESTAMPTZ" : type;
+        await exec("ALTER TABLE orders ADD COLUMN IF NOT EXISTS " + name + " " + pgType);
+      } else {
+        await exec("ALTER TABLE orders ADD COLUMN " + name + " " + type);
+      }
     } catch (_e) {}
   }
   for (const [name, type] of ORDER_ITEM_COLUMNS) {
@@ -142,6 +148,7 @@ async function apply(exec, driver) {
   } catch (_e) {}
   try {
     await exec("CREATE INDEX IF NOT EXISTS idx_cart_items_user ON cart_items(user_id)");
+    await exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_items_user_product ON cart_items(user_id, product_id)");
   } catch (_e) {}
   try {
     await exec(`CREATE TABLE IF NOT EXISTS senior_profiles (

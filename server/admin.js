@@ -1,6 +1,6 @@
 const db = require("./db");
 const { CARRIERS, carrierBy, trackingUrl } = require("./shipping");
-const { cancelPaidOrder, publicOrder } = require("./payments");
+const { cancelPaidOrder, cancelTossOrThrow, publicOrder } = require("./payments");
 
 function attach(app, deps) {
   const requireAdmin = deps.requireAdmin;
@@ -70,6 +70,39 @@ function attach(app, deps) {
       res.json({ ok: true, status: "CANCELLED", message: "결제를 취소하고 재고를 복구했습니다." });
     } catch (err) {
       res.status(err.status || 400).json({ error: err.message || "취소 승인에 실패했습니다." });
+    }
+  });
+
+  app.post("/api/admin/orders/:id/cancel-direct", requireAdmin, async (req, res) => {
+    try {
+      const order = await findAdminOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "주문을 찾을 수 없습니다." });
+      if (order.status !== "PAID" && order.status !== "PREPARING") {
+        return res.status(400).json({ error: "결제완료·상품준비중 주문만 직권 취소할 수 있습니다. 배송중이거나 이미 취소된 건은 처리할 수 없습니다." });
+      }
+      const reason = String((req.body && req.body.reason) || "").trim().slice(0, 255);
+      const detailReason = String((req.body && req.body.detailReason) || "").trim().slice(0, 200);
+      if (!reason) return res.status(400).json({ error: "취소 사유를 선택해 주세요." });
+      const fullReason = detailReason ? (reason + " / " + detailReason).slice(0, 255) : reason;
+      const savedPay = await db.findPaymentByTossOrderId(order.number);
+      const paymentKey = (savedPay && savedPay.paymentKey) || order.paymentKey || "";
+      try {
+        await cancelTossOrThrow(paymentKey, "[관리자 취소] " + fullReason);
+      } catch (err) {
+        return res.status(err.status || 502).json({
+          error: err.message || "토스 환불에 실패했습니다. 주문 상태는 변경하지 않았습니다."
+        });
+      }
+      await db.cancelDirectOrder(order.id, { reason: fullReason, cancelledBy: "ADMIN" });
+      await db.writeAudit(req.user.id, "cancel_direct", order.number + ":" + fullReason, req.ip || "");
+      res.json({
+        success: true,
+        ok: true,
+        status: "CANCELLED",
+        message: "관리자 취소 및 환불 처리가 완료되었습니다."
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message || "직권 취소에 실패했습니다." });
     }
   });
 

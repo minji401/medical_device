@@ -484,6 +484,15 @@ app.get("/api/me", async (req, res) => {
   res.json({ user: await publicUserWithShop(await currentUser(req)) });
 });
 
+app.get("/api/cart", requireUser, async (req, res) => {
+  res.json({ items: await db.listCartItems(req.user.id) });
+});
+
+app.put("/api/cart", requireUser, async (req, res) => {
+  const items = await db.replaceCartItems(req.user.id, req.body && req.body.items);
+  res.json({ items });
+});
+
 app.patch("/api/me", requireUser, async (req, res) => {
   const name = String(req.body.name || "").trim();
   const phone = normalizePhone(req.body.phone);

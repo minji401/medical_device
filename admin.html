@@ -39,7 +39,7 @@
         <div id="admin-orders" style="margin-top:12px"></div>
       </div>
       <div class="panel" id="admin-low"></div>
-      <form class="panel form" id="product-form" style="margin-top:18px">
+      <form class="panel form" id="product-form">
         <h2>상품 등록/수정</h2>
         <label>상품 ID</label>
         <input name="id" required />
@@ -53,12 +53,14 @@
         <input name="stock" type="number" value="0" />
         <label>카테고리</label>
         <input name="category" />
-        <label class="check"><input type="checkbox" name="is_hygiene_product" /> 위생용품(개봉 시 반품 제한)</label>
-        <label class="check"><input type="checkbox" name="is_active" checked /> 판매 중</label>
+        <div class="form-checks">
+          <label class="check"><input type="checkbox" name="is_hygiene_product" /> 위생용품(개봉 시 반품 제한)</label>
+          <label class="check"><input type="checkbox" name="is_active" checked /> 판매 중</label>
+        </div>
         <button class="btn btn-teal" type="submit">저장</button>
         <p class="form-error" id="admin-error" hidden></p>
       </form>
-      <form class="panel form" id="company-form" style="margin-top:18px">
+      <form class="panel form" id="company-form">
         <h2>회사 정보</h2>
         <label>상호명</label>
         <input name="shop_company_name" placeholder="[상호명]" />
@@ -83,6 +85,32 @@
       </div>
     </div>
   </section>
+  <div id="admin-cancel-modal" class="admin-modal" hidden>
+    <div class="admin-modal-dim" data-cancel-modal-close></div>
+    <div class="admin-modal-box" role="dialog" aria-labelledby="admin-cancel-title">
+      <h2 id="admin-cancel-title">관리자 직권 취소</h2>
+      <p class="muted">토스 결제를 환불하고 재고를 되돌립니다. 배송 중인 주문은 취소할 수 없습니다.</p>
+      <form class="form" id="admin-cancel-form">
+        <input type="hidden" name="order_id" />
+        <label for="admin-cancel-reason">취소 사유</label>
+        <select id="admin-cancel-reason" name="reason" required>
+          <option value="">사유를 선택해 주세요</option>
+          <option>고객 유선(전화) 취소 요청</option>
+          <option>상품 품절 / 단종</option>
+          <option>배송 / 설치 불가 (지역 또는 엘리베이터 없음 등)</option>
+          <option>상품 검수 불량 / 하자 발견</option>
+          <option>기타 (직접 입력)</option>
+        </select>
+        <label for="admin-cancel-detail">상세 사유 (선택)</label>
+        <textarea id="admin-cancel-detail" name="detailReason" placeholder="필요한 경우 자세한 내용을 적어 주세요."></textarea>
+        <p class="form-error" id="admin-cancel-error" hidden></p>
+        <div class="order-actions">
+          <button class="btn btn-outline" type="button" data-cancel-modal-close>닫기</button>
+          <button class="btn btn-danger" type="submit">취소 및 환불 실행</button>
+        </div>
+      </form>
+    </div>
+  </div>
   <div id="site-footer"></div>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>

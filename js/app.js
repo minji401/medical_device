@@ -34,11 +34,40 @@ const CHECKOUT_ITEMS_KEY = "oncare-checkout-items";
 const CART_STORAGE_KEYS = ["oncare-cart", "hyundai_cart_items", "cart", "oncare-checkout-items", "oncare-checkout-ids"];
 
 function cart() {
-  return JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+  try {
+    return JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+  } catch (_e) {
+    return [];
+  }
 }
-function saveCart(items) {
+let cartSaveTimer = 0;
+function persistCartIfLoggedIn(items, immediate) {
+  if (!window.currentUser || !window.currentUser.id) return;
+  clearTimeout(cartSaveTimer);
+  const run = () => {
+    api("/api/cart", { method: "PUT", body: JSON.stringify({ items: items || cart() }) }).catch(() => {});
+  };
+  if (immediate) run();
+  else cartSaveTimer = setTimeout(run, 250);
+}
+function saveCart(items, immediate) {
   localStorage.setItem(CART_KEY, JSON.stringify(items));
   updateCartCount();
+  persistCartIfLoggedIn(items, immediate);
+}
+async function loadUserCart() {
+  if (!window.currentUser || !window.currentUser.id) return;
+  try {
+    const data = await api("/api/cart");
+    const items = (data.items || []).map((item) => ({
+      id: item.id || item.product_id,
+      qty: Math.max(1, Math.min(20, Number(item.qty || item.quantity) || 1))
+    })).filter((item) => item.id);
+    localStorage.setItem(CART_KEY, JSON.stringify(items));
+    updateCartCount();
+    renderCart();
+    if (typeof window.__renderCheckout === "function") window.__renderCheckout();
+  } catch (_e) {}
 }
 function wipeClientCart() {
   CART_STORAGE_KEYS.forEach((key) => {
@@ -73,7 +102,7 @@ function removeOrderedFromCart(productIds) {
       (JSON.parse(sessionStorage.getItem(CHECKOUT_ITEMS_KEY) || "[]") || []).forEach((item) => drop.add(String(item.id)));
     } catch (_e) {}
   }
-  if (drop.size) saveCart(cart().filter((item) => !drop.has(String(item.id))));
+  if (drop.size) saveCart(cart().filter((item) => !drop.has(String(item.id))), true);
   try { sessionStorage.removeItem(CHECKOUT_ITEMS_KEY); } catch (_e) {}
 }
 function addToCart(id, qty = 1) {
@@ -87,7 +116,34 @@ function addToCart(id, qty = 1) {
 }
 function removeFromCart(id) {
   saveCart(cart().filter((i) => i.id !== id));
+  syncCheckoutItemQty(id, 0);
   renderCart();
+  if (typeof window.__renderCheckout === "function") window.__renderCheckout();
+}
+function setCartQty(id, qty) {
+  const next = Math.max(0, Math.min(20, Number(qty) || 0));
+  if (next < 1) {
+    removeFromCart(id);
+    return;
+  }
+  const items = cart();
+  const found = items.find((item) => String(item.id) === String(id));
+  if (found) found.qty = next;
+  else items.push({ id, qty: next });
+  saveCart(items);
+  syncCheckoutItemQty(id, next);
+  renderCart();
+  if (typeof window.__renderCheckout === "function") window.__renderCheckout();
+}
+function syncCheckoutItemQty(id, qty) {
+  try {
+    const picked = JSON.parse(sessionStorage.getItem(CHECKOUT_ITEMS_KEY) || "[]");
+    if (!Array.isArray(picked) || !picked.length) return;
+    const next = qty < 1
+      ? picked.filter((item) => String(item.id) !== String(id))
+      : picked.map((item) => String(item.id) === String(id) ? Object.assign({}, item, { qty }) : item);
+    sessionStorage.setItem(CHECKOUT_ITEMS_KEY, JSON.stringify(next));
+  } catch (_e) {}
 }
 function updateCartCount() {
   const n = cart().reduce((s, i) => s + i.qty, 0);
@@ -355,12 +411,12 @@ function statusLabel(status) {
     SHIPPED: "배송중",
     DELIVERED: "배송완료",
     CANCEL_REQUESTED: "취소요청",
-    CANCELLED: "취소/환불",
-    CANCELED: "취소/환불",
+    CANCELLED: "취소완료",
+    CANCELED: "취소완료",
     received: "결제대기",
     reviewing: "배송준비중",
     confirmed: "배송준비중",
-    cancelled: "취소/환불"
+    cancelled: "취소완료"
   }[status] || status;
 }
 
@@ -402,6 +458,7 @@ function refreshAuth() {
       }
     }
     if (logoutBtn) logoutBtn.hidden = !user;
+    if (user) return loadUserCart().then(() => user);
     return user;
   });
 }
@@ -543,7 +600,12 @@ function renderCart() {
       <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
       <div>
         <b>${esc(p.name)}</b>
-        <div>${i.qty}개 · ${isWelfare(p) ? "본인부담" : "판매가"} ${won(pay)}</div>
+        <div>${isWelfare(p) ? "본인부담" : "판매가"} ${won(pay)}</div>
+        <div class="qty-ctrl">
+          <button type="button" data-qty="-1" data-qty-id="${esc(p.id)}" aria-label="수량 줄이기">−</button>
+          <span>${i.qty}</span>
+          <button type="button" data-qty="1" data-qty-id="${esc(p.id)}" aria-label="수량 늘리기">+</button>
+        </div>
       </div>
       <button class="icon-btn" data-remove="${esc(p.id)}">✕</button>
     </div>`;
@@ -598,6 +660,15 @@ function mountShell(page) {
   document.body.addEventListener("click", (e) => {
     const add = e.target.closest("[data-add]");
     if (add) addToCart(add.dataset.add);
+    const qtyBtn = e.target.closest("[data-qty]");
+    if (qtyBtn) {
+      e.preventDefault();
+      const id = qtyBtn.getAttribute("data-qty-id");
+      const step = Number(qtyBtn.getAttribute("data-qty")) || 0;
+      const item = cart().find((row) => String(row.id) === String(id));
+      setCartQty(id, (item && item.qty ? item.qty : 1) + step);
+      return;
+    }
     const remove = e.target.closest("[data-remove]");
     if (remove) removeFromCart(remove.dataset.remove);
     if (e.target.closest("[data-logout]")) {
@@ -1343,6 +1414,8 @@ function initAccount() {
             </div>
             <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
           </div>
+          ${o.status === "CANCELLED" && o.cancelledBy === "ADMIN" && o.cancelReason
+            ? `<p class="muted">관리자 취소: ${esc(o.cancelReason)}</p>` : ""}
           <p>${title}</p>
           ${o.total ? `<p><b>${won(o.total)}</b>${o.shippingFee ? ` <small class="muted">(배송비 ${won(o.shippingFee)} 포함)</small>` : ""}</p>` : ""}
           <p class="muted">${o.type === "consult" ? "상담 신청" : "상품 주문"} · ${esc(o.name || "")}${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
@@ -1353,7 +1426,7 @@ function initAccount() {
           <div class="order-actions">
             ${track}
             ${receipt}
-            <a href="#order-${esc(o.id)}">상세보기</a>
+            <a class="btn btn-outline" href="#order-${esc(o.id)}">상세보기</a>
             ${o.cancel && o.cancel.canCancel ? `<button class="btn btn-outline" type="button" data-cancel-order="${esc(o.id)}">주문 취소</button>` : ""}
             ${o.cancel && o.cancel.canRequest ? `<button class="btn btn-outline" type="button" data-cancel-request="${esc(o.id)}">취소 요청</button>` : ""}
           </div>
@@ -1417,29 +1490,61 @@ function initCheckout() {
         form.address.value = "";
       }
     }
-    const items = checkoutItems();
     const box = document.querySelector("#checkout-items");
     const totalEl = document.querySelector("#checkout-total");
-    if (!items.length) {
-      box.innerHTML = `<p class="empty">장바구니가 비어 있습니다. <a href="shop.html">상품 보러 가기</a></p>`;
-      if (form) form.querySelector("button[type=submit]").disabled = true;
-      return;
+    const checkoutState = { previewTotal: 0 };
+    function paintCheckout() {
+      const items = checkoutItems();
+      if (!box) return items;
+      if (!items.length) {
+        box.innerHTML = `<p class="empty">장바구니가 비어 있습니다. <a href="shop.html">상품 보러 가기</a></p>`;
+        if (form) {
+          const submitBtn = form.querySelector("button[type=submit]");
+          if (submitBtn) submitBtn.disabled = true;
+        }
+        if (totalEl) totalEl.innerHTML = "";
+        checkoutState.previewTotal = 0;
+        return items;
+      }
+      if (form) {
+        const submitBtn = form.querySelector("button[type=submit]");
+        if (submitBtn) submitBtn.disabled = false;
+      }
+      let sum = 0;
+      box.innerHTML = items.map((i) => {
+        const p = productById(i.id);
+        if (!p) return "";
+        const unit = isWelfare(p) ? copay(p.price) : (p.salePrice || p.price);
+        const pay = unit * i.qty;
+        sum += pay;
+        return `<div class="cart-item is-checkout">
+          <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
+          <div>
+            <b>${esc(p.name)}</b>
+            <div>${won(pay)}</div>
+            <div class="qty-ctrl">
+              <button type="button" data-qty="-1" data-qty-id="${esc(p.id)}" aria-label="수량 줄이기">−</button>
+              <span>${i.qty}</span>
+              <button type="button" data-qty="1" data-qty-id="${esc(p.id)}" aria-label="수량 늘리기">+</button>
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+      const ship = sum >= 50000 ? 0 : 3000;
+      checkoutState.previewTotal = sum + ship;
+      if (totalEl) {
+        totalEl.innerHTML = `상품 ${won(sum)} · 배송비 ${ship ? won(ship) : "무료"}<br><b>결제 금액 ${won(checkoutState.previewTotal)}</b>`;
+      }
+      return items;
     }
-    let sum = 0;
-    box.innerHTML = items.map((i) => {
-      const p = productById(i.id);
-      if (!p) return "";
-      const unit = isWelfare(p) ? copay(p.price) : p.price;
-      const pay = unit * i.qty;
-      sum += pay;
-      return `<div class="cart-item">
-        <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
-        <div><b>${esc(p.name)}</b><div>${i.qty}개 · ${won(pay)}</div></div>
-      </div>`;
-    }).join("");
-    const ship = sum >= 50000 ? 0 : 3000;
-    const previewTotal = sum + ship;
-    totalEl.innerHTML = `상품 ${won(sum)} · 배송비 ${ship ? won(ship) : "무료"}<br><b>결제 금액 ${won(previewTotal)}</b>`;
+    window.__renderCheckout = function () {
+      paintCheckout();
+      if (window.__tossWidgets && checkoutState.previewTotal > 0) {
+        window.__tossWidgets.setAmount({ currency: "KRW", value: checkoutState.previewTotal }).catch(() => {});
+      }
+    };
+    let items = paintCheckout();
+    if (!items.length) return;
     bindPostcode(document.querySelector("#postcode-btn"), form);
     let tossWidgets = null;
     let tossClientKey = "";
@@ -1454,7 +1559,8 @@ function initCheckout() {
         ? ("u_" + String(user.id).replace(/[^A-Za-z0-9]/g, "")).slice(0, 50)
         : window.TossPayments.ANONYMOUS;
       tossWidgets = window.TossPayments(tossClientKey).widgets({ customerKey });
-      await tossWidgets.setAmount({ currency: "KRW", value: previewTotal });
+      window.__tossWidgets = tossWidgets;
+      await tossWidgets.setAmount({ currency: "KRW", value: checkoutState.previewTotal });
       await tossWidgets.renderPaymentMethods({ selector: "#payment-method" });
       await tossWidgets.renderAgreement({ selector: "#agreement" });
     }).catch((err) => {
@@ -1466,6 +1572,7 @@ function initCheckout() {
       const submitBtn = form.querySelector("button[type=submit]");
       if (submitBtn) submitBtn.disabled = true;
       try {
+        items = checkoutItems();
         rememberCheckoutItems(items);
         const preorder = await api("/orders/create-preorder/", {
           method: "POST",
@@ -1580,7 +1687,6 @@ function initPaymentFail() {
 
 function initOrderComplete() {
   mountShell("shop");
-  saveCart([]);
   const parts = location.pathname.split("/").filter(Boolean);
   const orderId = decodeURIComponent(parts[parts.length - 1] || "");
   const el = document.querySelector("#complete-order-id");
@@ -1779,7 +1885,10 @@ async function loadAdminOrders() {
             <button class="btn btn-outline" type="button" data-cancel-reject="${esc(o.id)}">취소 거절</button>
           </div>`
         : "";
-      return `<article class="panel order-card">
+      const directCancel = (o.status === "PAID" || o.status === "PREPARING")
+        ? `<div class="order-admin"><button class="btn btn-danger" type="button" data-cancel-direct="${esc(o.id)}">관리자 직권 취소</button></div>`
+        : "";
+      return `<article class="order-card">
         <div class="order-top">
           <div><b>${esc(o.number)}</b> <span class="status-pill ${statusClass(o.status)}">${statusLabel(o.status)}</span></div>
           <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
@@ -1790,9 +1899,10 @@ async function loadAdminOrders() {
         <p>${items || "상품 없음"}</p>
         <p><b>${won(o.total || 0)}</b>${o.shippingFee ? ` · 배송비 ${won(o.shippingFee)}` : " · 배송비 무료"} ${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
         ${o.memo ? `<p class="muted">메모: ${esc(o.memo)}</p>` : ""}
-        ${o.cancelReason ? `<p class="muted">거절 사유: ${esc(o.cancelReason)}</p>` : ""}
+        ${o.cancelReason ? `<p class="muted">${o.cancelledBy === "ADMIN" ? "관리자 취소" : "거절 사유"}: ${esc(o.cancelReason)}</p>` : ""}
         ${shipForm}
         ${cancelBtns}
+        ${directCancel}
       </article>`;
     }).join("");
   }
@@ -1801,11 +1911,58 @@ async function loadAdminOrders() {
     filter.innerHTML = statuses.map((s) => `<option value="${s}">${s ? statusLabel(s) : "전체 주문"}</option>`).join("");
     filter.onchange = () => render().catch((err) => toast(err.message));
   }
+  const modal = document.querySelector("#admin-cancel-modal");
+  const cancelForm = document.querySelector("#admin-cancel-form");
+  function closeCancelModal() {
+    if (modal) modal.hidden = true;
+  }
+  if (modal && !modal.dataset.bound) {
+    modal.dataset.bound = "1";
+    modal.addEventListener("click", (e) => {
+      if (e.target.closest("[data-cancel-modal-close]")) closeCancelModal();
+    });
+  }
+  if (cancelForm && !cancelForm.dataset.bound) {
+    cancelForm.dataset.bound = "1";
+    cancelForm.onsubmit = async (e) => {
+      e.preventDefault();
+      showFormError("#admin-cancel-error", "");
+      const id = cancelForm.order_id.value;
+      const reason = cancelForm.reason.value;
+      const detailReason = cancelForm.detailReason.value;
+      if (!reason) {
+        showFormError("#admin-cancel-error", "취소 사유를 선택해 주세요.");
+        return;
+      }
+      if (!confirm("이 주문의 결제를 환불하고 취소할까요?")) return;
+      try {
+        const result = await api("/api/admin/orders/" + encodeURIComponent(id) + "/cancel-direct", {
+          method: "POST",
+          body: JSON.stringify({ reason, detailReason })
+        });
+        toast(result.message || "관리자 취소 및 환불 처리가 완료되었습니다.");
+        closeCancelModal();
+        await render();
+      } catch (err) {
+        showFormError("#admin-cancel-error", err.message);
+      }
+    };
+  }
   box.onclick = async (e) => {
     const ship = e.target.closest("[data-ship-save]");
     const approve = e.target.closest("[data-cancel-approve]");
     const reject = e.target.closest("[data-cancel-reject]");
+    const direct = e.target.closest("[data-cancel-direct]");
     try {
+      if (direct) {
+        if (cancelForm) {
+          cancelForm.reset();
+          cancelForm.order_id.value = direct.getAttribute("data-cancel-direct");
+        }
+        showFormError("#admin-cancel-error", "");
+        if (modal) modal.hidden = false;
+        return;
+      }
       if (ship) {
         const wrap = ship.closest("[data-ship]");
         const carrier = wrap.querySelector("[data-carrier]").value;

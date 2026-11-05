@@ -50,6 +50,7 @@ async function tossRequest(path, options) {
     if (!res.ok) {
       const err = new Error(data.message || "결제사 응답을 확인하지 못했습니다.");
       err.status = res.status >= 400 ? res.status : 502;
+      err.code = data.code || "";
       throw err;
     }
     return data;
@@ -105,6 +106,8 @@ function publicOrder(order, mask) {
     addressDetail: mask ? "" : (order.addressDetail || ""),
     postalCode: order.postalCode || order.zipcode || "",
     cancelReason: order.cancelReason || "",
+    cancelledBy: order.cancelledBy || "",
+    cancelledAt: order.cancelledAt || "",
     previousStatus: order.previousStatus || "",
     title: ((order.items || [])[0] && (order.items || [])[0].name) || (order.type === "consult" ? "상담 신청" : "주문"),
     cancel
@@ -173,6 +176,32 @@ async function applyVerified(tossPayment) {
   } catch (err) {
     console.error("applyVerified failed", err && err.message);
     return null;
+  }
+}
+
+async function cancelTossOrThrow(paymentKey, reason) {
+  if (!paymentKey) return { skipped: true };
+  if (!tossKeys().secret) {
+    const err = new Error("결제 설정이 없습니다.");
+    err.status = 503;
+    throw err;
+  }
+  try {
+    await tossRequest("/" + encodeURIComponent(paymentKey) + "/cancel", {
+      method: "POST",
+      body: { cancelReason: String(reason || "주문 취소").slice(0, 200) }
+    });
+    return { skipped: false };
+  } catch (err) {
+    const code = String((err && err.code) || "");
+    const message = String((err && err.message) || "");
+    if (code === "ALREADY_CANCELED" || /이미 취소/.test(message)) {
+      return { skipped: false, already: true };
+    }
+    const wrap = new Error(message || "토스 환불에 실패했습니다.");
+    wrap.status = err && err.status && err.status < 500 ? 400 : 502;
+    wrap.code = code;
+    throw wrap;
   }
 }
 
@@ -514,4 +543,4 @@ async function cancelPaidOrder(order) {
   }
 }
 
-module.exports = { attach, publicOrder, cancelPaidOrder, tossKeys, confirmTossOrder };
+module.exports = { attach, publicOrder, cancelPaidOrder, cancelTossOrThrow, tossKeys, confirmTossOrder };

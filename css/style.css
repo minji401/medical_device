@@ -308,6 +308,7 @@ ul { list-style: none; }
 .btn-teal { background: var(--teal); color: #fff; }
 .btn-gold { background: var(--kakao); color: #191919; }
 .btn-outline { background: #fff; color: var(--teal-dark); border: 1px solid var(--line); }
+.btn-danger { background: #b42318; color: #fff; }
 .btn-lg { min-height: 54px; padding: 0 24px; font-size: 16px; }
 .btn:hover { transform: translateY(-1px); }
 
@@ -623,6 +624,18 @@ ul { list-style: none; }
   font-size: 15px;
   background: #fff;
 }
+.form input[type="checkbox"],
+.form input[type="radio"] {
+  width: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  flex: 0 0 auto;
+  accent-color: var(--teal);
+}
 .calc-result {
   margin-top: 18px;
   background: var(--teal-soft);
@@ -649,13 +662,18 @@ ul { list-style: none; }
 }
 .checks { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
 .check {
-  display: flex;
-  gap: 6px;
+  display: inline-flex;
+  gap: 10px;
   align-items: center;
+  justify-content: flex-start;
+  width: fit-content;
+  max-width: 100%;
   background: var(--bg);
-  border-radius: 999px;
-  padding: 8px 12px;
-  white-space: nowrap;
+  border-radius: 14px;
+  padding: 10px 14px;
+  white-space: normal;
+  font-weight: 600;
+  line-height: 1.4;
 }
 .check-line {
   white-space: normal;
@@ -803,6 +821,31 @@ ul { list-style: none; }
   border-bottom: 1px solid var(--line);
   align-items: center;
 }
+.cart-item.is-checkout {
+  grid-template-columns: 64px 1fr auto;
+}
+.qty-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.qty-ctrl button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--teal-dark);
+}
+.qty-ctrl span {
+  min-width: 1.5em;
+  text-align: center;
+  font-weight: 700;
+}
 .cart-check { display: flex; align-items: center; }
 .cart-select-all {
   display: flex;
@@ -834,6 +877,7 @@ ul { list-style: none; }
   color: var(--teal-dark);
   white-space: nowrap;
 }
+.auth-chip[hidden] { display: none !important; }
 .auth-chip:hover { background: var(--teal-soft); }
 .auth-wrap { max-width: 460px; }
 .login-match {
@@ -1102,6 +1146,29 @@ body:has(.auth-page) .mobile-nav { display: none; }
   gap: 16px;
 }
 .order-card { margin-bottom: 16px; }
+#admin-dashboard {
+  display: grid;
+  gap: 24px;
+}
+#admin-dashboard .panel { margin-top: 0; }
+#admin-orders {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+#admin-orders .order-card {
+  margin-bottom: 0;
+  box-shadow: none;
+  border: 1px solid var(--line);
+  padding: 18px 20px;
+  border-radius: 16px;
+}
+#admin-low ul { margin: 8px 0 0; padding-left: 18px; }
+.form-checks {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
 .order-top {
   display: flex;
   justify-content: space-between;
@@ -1138,6 +1205,30 @@ body:has(.auth-page) .mobile-nav { display: none; }
 }
 .sitemap-list a:hover { color: var(--teal-dark); }
 
+.admin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.admin-modal[hidden] { display: none !important; }
+.admin-modal-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 30, 28, .45);
+}
+.admin-modal-box {
+  position: relative;
+  width: min(480px, 100%);
+  background: #fff;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+.admin-modal-box h2 { margin-bottom: 8px; }
 .order-admin { margin-top: 12px; }
 .order-admin select {
   margin-left: 8px;
@@ -1263,7 +1354,21 @@ body:has(.auth-page) .mobile-nav { display: none; }
 .status-pill.is-ship { background: #e8f6ef; color: #1b6b3a; }
 .status-pill.is-done { background: #ececec; color: #333; }
 .status-pill.is-cancel { background: #fde8e8; color: #8a1111; }
-.order-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.order-actions .btn,
+.order-actions a.btn {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 14px;
+  font-size: 14px;
+  white-space: nowrap;
+}
 .empty-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .low-stock, .soldout { color: #8a1111; font-weight: 700; }
 .admin-edit { display: inline-block; margin-top: 10px; font-size: 0.86rem; color: #8f6c38; text-decoration: underline; }
