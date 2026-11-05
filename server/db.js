@@ -676,22 +676,135 @@ async function findProduct(id) {
   return rows[0] || null;
 }
 
+function stringifyImages(images) {
+  const list = (Array.isArray(images) ? images : []).map((v) => String(v || "").trim()).filter(Boolean);
+  return JSON.stringify(list);
+}
+
 async function upsertProduct(row) {
   const found = await findProduct(row.id);
+  const imagesJson = stringifyImages(row.images);
+  const thumb = String(row.thumbnail || (row.images && row.images[0]) || "").trim();
   if (found) {
     await exec(
-      `UPDATE products SET name=?, price=?, sale_price=?, stock=?, category=?, thumbnail_url=?, description=?, is_hygiene_product=?, is_active=? WHERE id=?`,
-      [row.name, row.price, row.salePrice, row.stock, row.category, row.thumbnail || "", row.description || "", row.isHygiene ? 1 : 0, row.isActive ? 1 : 0, row.id]
+      `UPDATE products SET name=?, price=?, sale_price=?, stock=?, category=?, thumbnail_url=?, image_url=?, images=?, description=?, is_hygiene_product=?, is_active=? WHERE id=?`,
+      [row.name, row.price, row.salePrice, row.stock, row.category, thumb, thumb, imagesJson, row.description || "", row.isHygiene ? 1 : 0, row.isActive ? 1 : 0, row.id]
     );
   } else {
     await exec(
-      `INSERT INTO products (id, name, price, sale_price, stock, category, thumbnail_url, description, is_hygiene_product, is_active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.id, row.name, row.price, row.salePrice, row.stock, row.category, row.thumbnail || "", row.description || "", row.isHygiene ? 1 : 0, row.isActive ? 1 : 0, new Date().toISOString()]
+      `INSERT INTO products (id, name, price, sale_price, stock, category, thumbnail_url, image_url, images, description, is_hygiene_product, is_active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, row.name, row.price, row.salePrice, row.stock, row.category, thumb, thumb, imagesJson, row.description || "", row.isHygiene ? 1 : 0, row.isActive ? 1 : 0, new Date().toISOString()]
     );
   }
   await exec("INSERT INTO product_stock (product_id, qty) VALUES (?, ?) ON CONFLICT (product_id) DO UPDATE SET qty = excluded.qty", [row.id, row.stock]);
   return findProduct(row.id);
+}
+
+async function searchProducts(keyword) {
+  const cleanKeyword = String(keyword || "").replace(/\s+/g, "");
+  if (!cleanKeyword) return [];
+  const like = "%" + cleanKeyword + "%";
+  const op = driver === "pg" ? "ILIKE" : "LIKE";
+  return exec(
+    `SELECT * FROM products WHERE COALESCE(is_active, 1) != 0 AND (
+      REPLACE(COALESCE(name, ''), ' ', '') ${op} ?
+      OR REPLACE(COALESCE(category, ''), ' ', '') ${op} ?
+      OR REPLACE(COALESCE(description, ''), ' ', '') ${op} ?
+    ) ORDER BY created_at DESC`,
+    [like, like, like]
+  );
+}
+
+function maskPersonName(name) {
+  const text = String(name || "").trim();
+  if (!text) return "구매자";
+  if (text.length === 1) return "*";
+  if (text.length === 2) return text[0] + "*";
+  return text[0] + "*" + text.slice(-1);
+}
+
+async function productSocialStats(productId) {
+  const reviews = await exec("SELECT rating FROM product_reviews WHERE product_id = ?", [productId]);
+  const qnas = await exec("SELECT id FROM product_inquiries WHERE product_id = ?", [productId]);
+  const count = reviews.length;
+  const sum = reviews.reduce((n, row) => n + Number(row.rating || 0), 0);
+  return {
+    reviewCount: count,
+    qnaCount: qnas.length,
+    ratingAvg: count ? Math.round((sum / count) * 10) / 10 : 0
+  };
+}
+
+async function listProductReviews(productId) {
+  const rows = await exec("SELECT * FROM product_reviews WHERE product_id = ? ORDER BY created_at DESC", [productId]);
+  return rows.map((row) => ({
+    id: row.id,
+    productId: row.product_id,
+    rating: Number(row.rating) || 5,
+    optionText: row.option_text || "",
+    content: row.content || "",
+    author: maskPersonName(row.author_name),
+    createdAt: row.created_at
+  }));
+}
+
+async function userPurchasedProduct(userId, productId) {
+  if (!userId || !productId) return false;
+  const orders = await listOrders({ userId });
+  const ok = { PAID: 1, PREPARING: 1, SHIPPING: 1, SHIPPED: 1, DELIVERED: 1 };
+  return orders.some((order) => ok[order.status] && (order.items || []).some((item) => String(item.id) === String(productId)));
+}
+
+async function createProductReview(row) {
+  const id = "rv_" + crypto.randomUUID();
+  await exec(
+    "INSERT INTO product_reviews (id, product_id, user_id, author_name, rating, option_text, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, row.productId, row.userId, row.authorName || "", Math.max(1, Math.min(5, Number(row.rating) || 5)), String(row.optionText || "").slice(0, 80), String(row.content || "").slice(0, 2000), new Date().toISOString()]
+  );
+  return { id };
+}
+
+async function listProductInquiries(productId, viewer) {
+  const rows = await exec("SELECT * FROM product_inquiries WHERE product_id = ? ORDER BY created_at DESC", [productId]);
+  const isAdmin = viewer && (viewer.role === "admin" || viewer.isAdmin);
+  return rows.map((row) => {
+    const mine = viewer && String(viewer.id) === String(row.user_id);
+    const secret = Number(row.is_secret) === 1;
+    const canRead = !secret || mine || isAdmin;
+    return {
+      id: row.id,
+      productId: row.product_id,
+      isSecret: secret,
+      status: String(row.answer || "").trim() ? "ANSWERED" : "PENDING",
+      content: canRead ? row.content : "비밀글입니다.",
+      answer: canRead ? (row.answer || "") : "",
+      answeredAt: row.answered_at || "",
+      author: maskPersonName(row.author_name),
+      mine: Boolean(mine),
+      createdAt: row.created_at
+    };
+  });
+}
+
+async function createProductInquiry(row) {
+  const id = "qn_" + crypto.randomUUID();
+  await exec(
+    "INSERT INTO product_inquiries (id, product_id, user_id, author_name, content, is_secret, answer, created_at) VALUES (?, ?, ?, ?, ?, ?, '', ?)",
+    [id, row.productId, row.userId, row.authorName || "", String(row.content || "").slice(0, 2000), row.isSecret ? 1 : 0, new Date().toISOString()]
+  );
+  return { id };
+}
+
+async function answerProductInquiry(id, answer) {
+  const text = String(answer || "").trim().slice(0, 2000);
+  if (!text) return null;
+  await exec(
+    "UPDATE product_inquiries SET answer = ?, answered_at = ? WHERE id = ?",
+    [text, new Date().toISOString(), id]
+  );
+  const rows = await exec("SELECT * FROM product_inquiries WHERE id = ? LIMIT 1", [id]);
+  return rows[0] || null;
 }
 
 async function getShopProfile(userId) {
@@ -1421,6 +1534,14 @@ module.exports = {
   listProducts,
   findProduct,
   upsertProduct,
+  searchProducts,
+  productSocialStats,
+  listProductReviews,
+  userPurchasedProduct,
+  createProductReview,
+  listProductInquiries,
+  createProductInquiry,
+  answerProductInquiry,
   getShopProfile,
   upsertShopProfile,
   withdrawUser,

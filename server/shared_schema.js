@@ -179,6 +179,45 @@ async function apply(exec, driver) {
       else await exec("ALTER TABLE care_consultations ADD COLUMN " + name + " " + type);
     } catch (_e) {}
   }
+  const productCols = [
+    ["images", "TEXT NOT NULL DEFAULT '[]'"],
+    ["image_url", "TEXT NOT NULL DEFAULT ''"]
+  ];
+  for (const [name, type] of productCols) {
+    try {
+      if (driver === "pg") await exec("ALTER TABLE products ADD COLUMN IF NOT EXISTS " + name + " " + type);
+      else await exec("ALTER TABLE products ADD COLUMN " + name + " " + type);
+    } catch (_e) {}
+  }
+  try {
+    await exec(`CREATE TABLE IF NOT EXISTS product_reviews (
+      id TEXT PRIMARY KEY,
+      product_id TEXT NOT NULL,
+      user_id TEXT,
+      author_name TEXT NOT NULL DEFAULT '',
+      rating INTEGER NOT NULL DEFAULT 5,
+      option_text TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+  } catch (_e) {}
+  try {
+    await exec(`CREATE TABLE IF NOT EXISTS product_inquiries (
+      id TEXT PRIMARY KEY,
+      product_id TEXT NOT NULL,
+      user_id TEXT,
+      author_name TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      is_secret INTEGER NOT NULL DEFAULT 0,
+      answer TEXT NOT NULL DEFAULT '',
+      answered_at TEXT,
+      created_at TEXT NOT NULL
+    )`);
+  } catch (_e) {}
+  try {
+    await exec("CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id)");
+    await exec("CREATE INDEX IF NOT EXISTS idx_product_inquiries_product ON product_inquiries(product_id)");
+  } catch (_e) {}
   void cols;
 }
 

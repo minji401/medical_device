@@ -34,6 +34,7 @@ const passwords = require("./server/passwords");
 const productStore = require("./server/products");
 const orderUrls = require("./server/orders/urls");
 const adminRoutes = require("./server/admin");
+const { CARRIERS } = require("./server/shipping");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
@@ -186,6 +187,14 @@ function normalizePhone(raw) {
 
 function validPhone(phone) {
   return /^01[016789]\d{7,8}$/.test(phone);
+}
+
+function validPersonName(raw) {
+  return /^[가-힣A-Za-z]{2,40}$/.test(String(raw || "").replace(/\s+/g, ""));
+}
+
+function validMobile010(phone) {
+  return /^010\d{8}$/.test(phone);
 }
 
 const SCRYPT = { N: 16384, r: 8, p: 1 };
@@ -503,7 +512,7 @@ app.patch("/api/me", requireUser, async (req, res) => {
   const email = String(req.body.email || "").trim().toLowerCase();
   const password = String(req.body.password || "");
   const current = String(req.body.currentPassword || "");
-  if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
+  if (!validPersonName(name)) return res.status(400).json({ error: "이름은 한글 또는 영문 2자 이상으로 입력해 주세요." });
   if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
   const taken = await db.findUserByPhone(phone);
   if (taken && taken.id !== req.user.id) {
@@ -555,8 +564,8 @@ app.post("/api/signup", guard.signupLimiter, async (req, res) => {
   const marketing = req.body.marketing === true || req.body.marketing === "true" || req.body.marketing === "on";
   if (!age14) return res.status(400).json({ error: "만 14세 이상만 가입할 수 있습니다." });
   if (!validEmail(email)) return res.status(400).json({ error: "이메일을 올바르게 입력해 주세요." });
-  if (name.length < 2) return res.status(400).json({ error: "이름을 입력해 주세요." });
-  if (!validPhone(phone)) return res.status(400).json({ error: "휴대폰 번호를 확인해 주세요." });
+  if (!validPersonName(name)) return res.status(400).json({ error: "이름은 한글 또는 영문 2자 이상으로 입력해 주세요." });
+  if (!validMobile010(phone)) return res.status(400).json({ error: "연락처는 010-0000-0000 형식으로 입력해 주세요." });
   if (confirm && password !== confirm) {
     return res.status(400).json({ error: "비밀번호가 일치하지 않습니다." });
   }
@@ -989,7 +998,8 @@ app.get("/api/orders", requireUser, async (req, res) => {
     await db.writeAudit(req.user.id, "view_orders", "all", req.ip || "");
   }
   res.json({
-    orders: list.map((o) => payments.publicOrder(o, mask))
+    orders: list.map((o) => payments.publicOrder(o, mask)),
+    carriers: req.user.role === "admin" || req.user.isAdmin ? CARRIERS : []
   });
 });
 
@@ -1014,6 +1024,19 @@ app.patch("/api/orders/:id", requireUser, async (req, res) => {
     await db.writeAudit(req.user.id, "order_status", order.number + ":CANCELLED", req.ip || "");
     return res.json({ ok: true, status: "CANCELLED" });
   }
+  if (status === "SHIPPING" || status === "SHIPPED") {
+    const tracking = String(req.body.tracking_number || order.trackingNumber || "").trim();
+    const carrier = String(req.body.carrier || order.carrier || "").trim();
+    if (!tracking) {
+      return res.status(400).json({ error: "배송중으로 바꾸려면 택배사와 송장번호를 입력한 뒤 발송 저장을 눌러 주세요." });
+    }
+    const saved = await db.updateOrderStatus(order.id, "SHIPPING", {
+      tracking_number: tracking,
+      carrier
+    });
+    await db.writeAudit(req.user.id, "order_ship", order.number + ":" + (carrier || "SHIPPING"), req.ip || "");
+    return res.json({ ok: true, status: saved.status, tracking_number: tracking, carrier });
+  }
   const tracking = String(req.body.tracking_number || "").trim();
   const saved = await db.updateOrderStatus(order.id, status, { tracking_number: tracking });
   await db.writeAudit(req.user.id, "order_status", order.number + ":" + status, req.ip || "");
@@ -1027,6 +1050,11 @@ app.post("/api/me/withdraw", requireUser, async (req, res) => {
   res.json({ ok: true, message: "탈퇴가 완료되었습니다. 주문·결제 기록은 관계 법령에 따라 보관됩니다." });
 });
 
+app.get("/api/products/search", async (req, res) => {
+  const q = String(req.query.q || "");
+  res.json({ q, products: await productStore.search(catalog, q) });
+});
+
 app.get("/api/products", async (_req, res) => {
   res.json({ products: await productStore.all(catalog) });
 });
@@ -1034,7 +1062,8 @@ app.get("/api/products", async (_req, res) => {
 app.get("/api/products/:id", async (req, res) => {
   const product = await productStore.one(catalog, req.params.id);
   if (!product) return res.status(404).json({ error: "상품을 찾을 수 없습니다." });
-  res.json({ product });
+  const stats = await db.productSocialStats(req.params.id);
+  res.json({ product: Object.assign({}, product, stats) });
 });
 
 async function requireAdmin(req, res, next) {
@@ -1073,6 +1102,55 @@ app.patch("/api/admin/products/:id", requireAdmin, async (req, res) => {
   req.body.id = req.params.id;
   const saved = await productStore.save(req.body);
   res.json({ product: saved });
+});
+
+app.get("/api/products/:id/reviews", async (req, res) => {
+  const stats = await db.productSocialStats(req.params.id);
+  res.json({
+    reviews: await db.listProductReviews(req.params.id),
+    average: stats.ratingAvg,
+    count: stats.reviewCount
+  });
+});
+
+app.post("/api/products/:id/reviews", requireUser, async (req, res) => {
+  const bought = await db.userPurchasedProduct(req.user.id, req.params.id);
+  if (!bought) return res.status(403).json({ error: "결제 완료된 상품만 후기를 작성할 수 있습니다." });
+  const content = String((req.body && req.body.content) || "").trim();
+  if (content.length < 5) return res.status(400).json({ error: "후기를 5자 이상 입력해 주세요." });
+  await db.createProductReview({
+    productId: req.params.id,
+    userId: req.user.id,
+    authorName: req.user.name || req.user.username || "",
+    rating: req.body.rating,
+    optionText: req.body.option_text || req.body.optionText || "",
+    content
+  });
+  res.json({ ok: true });
+});
+
+app.get("/api/products/:id/inquiries", async (req, res) => {
+  const viewer = await currentUser(req);
+  res.json({ inquiries: await db.listProductInquiries(req.params.id, viewer) });
+});
+
+app.post("/api/products/:id/inquiries", requireUser, async (req, res) => {
+  const content = String((req.body && req.body.content) || "").trim();
+  if (content.length < 5) return res.status(400).json({ error: "문의 내용을 5자 이상 입력해 주세요." });
+  await db.createProductInquiry({
+    productId: req.params.id,
+    userId: req.user.id,
+    authorName: req.user.name || req.user.username || "",
+    content,
+    isSecret: Boolean(req.body && (req.body.is_secret || req.body.isSecret))
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/admin/inquiries/:id/answer", requireAdmin, async (req, res) => {
+  const saved = await db.answerProductInquiry(req.params.id, req.body && req.body.answer);
+  if (!saved) return res.status(400).json({ error: "답변 내용을 입력해 주세요." });
+  res.json({ ok: true });
 });
 
 adminRoutes.attach(app, { requireAdmin });

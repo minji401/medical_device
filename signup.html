@@ -28,12 +28,12 @@
           </div>
         </div>
         <div class="auth-field">
-          <label for="signup-name">이름</label>
+          <label for="signup-name">이름 (주문자 성명)</label>
           <div class="auth-input">
             <span class="ico" aria-hidden="true">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 20V8l6-4 6 4v12" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
             </span>
-            <input id="signup-name" name="name" required placeholder="구매자 또는 보호자 이름" autocomplete="name" />
+            <input id="signup-name" name="name" required placeholder="한글 또는 영문 2자 이상" autocomplete="name" />
           </div>
         </div>
         <div class="auth-field">
@@ -56,7 +56,7 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
           </div>
-          <p class="muted" style="margin-top:6px">영문, 숫자, 특수문자를 포함하여 8~16자로 입력해 주세요.</p>
+          <small class="form-text text-muted">영문, 숫자, 특수문자 포함 8~16자로 입력해 주세요.</small>
           <ul class="pw-checks" id="pw-checks" aria-live="polite">
             <li data-check="len">8~16자 이내</li>
             <li data-check="letter">영문 포함</li>

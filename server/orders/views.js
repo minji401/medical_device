@@ -170,15 +170,21 @@ function cancelOrderHandler() {
     if (!policy.canCancel) {
       return res.status(400).json({ error: policy.message || "이 주문은 취소할 수 없습니다." });
     }
+    const userCancel = {
+      cancelled_by: "USER",
+      cancel_reason: "고객 직접 취소",
+      cancelled_at: new Date().toISOString()
+    };
     if (policy.mode === "refund") {
       try {
         const canceled = await cancelPaidOrder(order);
-        if (!canceled) await db.updateOrderStatus(order.id, "CANCELLED");
+        if (!canceled) await db.updateOrderStatus(order.id, "CANCELLED", userCancel);
+        else await db.updateOrderStatus(order.id, "CANCELLED", userCancel);
       } catch (_err) {
         return res.status(400).json({ error: "결제 취소가 완료되지 않았습니다. 고객센터로 문의해 주세요." });
       }
     } else {
-      await db.updateOrderStatus(order.id, "CANCELLED");
+      await db.updateOrderStatus(order.id, "CANCELLED", userCancel);
     }
     await db.writeAudit(req.user.id, "order_cancel", order.number, req.ip || "");
     return res.json({ ok: true, status: "CANCELLED", message: "주문이 취소되었습니다." });

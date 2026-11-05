@@ -8,7 +8,7 @@ function passwordChecks(password) {
     len: value.length >= 8 && value.length <= 16,
     letter: /[A-Za-z]/.test(value),
     digit: /\d/.test(value),
-    special: /[^A-Za-z0-9]/.test(value)
+    special: /[!@#$%^&*(),.?":{}|<>]/.test(value)
   };
 }
 

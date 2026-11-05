@@ -121,11 +121,7 @@ function removeFromCart(id) {
   if (typeof window.__renderCheckout === "function") window.__renderCheckout();
 }
 function setCartQty(id, qty) {
-  const next = Math.max(0, Math.min(20, Number(qty) || 0));
-  if (next < 1) {
-    removeFromCart(id);
-    return;
-  }
+  const next = Math.max(1, Math.min(20, Number(qty) || 1));
   const items = cart();
   const found = items.find((item) => String(item.id) === String(id));
   if (found) found.qty = next;
@@ -258,8 +254,31 @@ function footerHTML() {
 
 function passwordRuleError(password) {
   const value = String(password || "");
-  if (value.length < 8 || value.length > 16 || !/[A-Za-z]/.test(value) || !/\d/.test(value) || !/[^A-Za-z0-9]/.test(value)) {
+  if (value.length < 8 || value.length > 16 || !/[A-Za-z]/.test(value) || !/\d/.test(value) || !/[!@#$%^&*(),.?":{}|<>]/.test(value)) {
     return "영문, 숫자, 특수문자를 포함하여 8~16자로 입력해 주세요.";
+  }
+  return "";
+}
+
+function nameRuleError(name) {
+  const compact = String(name || "").replace(/\s+/g, "");
+  if (!/^[가-힣A-Za-z]{2,40}$/.test(compact)) {
+    return "이름은 한글 또는 영문 2자 이상으로 입력해 주세요.";
+  }
+  return "";
+}
+
+function emailRuleError(email) {
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || "").trim())) {
+    return "이메일 형식을 확인해 주세요.";
+  }
+  return "";
+}
+
+function phoneRuleError(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!/^010\d{8}$/.test(digits)) {
+    return "연락처는 010-0000-0000 형식으로 입력해 주세요.";
   }
   return "";
 }
@@ -273,7 +292,7 @@ function bindPasswordChecks(input) {
       len: v.length >= 8 && v.length <= 16,
       letter: /[A-Za-z]/.test(v),
       digit: /\d/.test(v),
-      special: /[!@#$%^&*]/.test(v)
+      special: /[!@#$%^&*(),.?":{}|<>]/.test(v)
     };
     list.querySelectorAll("[data-check]").forEach((li) => {
       li.classList.toggle("ok", !!checks[li.dataset.check]);
@@ -499,13 +518,103 @@ function priceHTML(p) {
         <small>비급여 · 일반 구매</small>`;
 }
 
+function productImages(p) {
+  const out = [];
+  function push(url) {
+    const value = String(url || "").trim();
+    if (value && out.indexOf(value) < 0) out.push(value);
+  }
+  if (p && Array.isArray(p.images)) p.images.forEach(push);
+  push(p && (p.thumbnail || p.thumbnail_url || p.image_url));
+  return out;
+}
+
+function thumbHTML(p, className) {
+  const cls = className || "thumb";
+  const images = productImages(p);
+  const fallback = ICONS[(p && p.category) || "bed"] || ICONS.bed;
+  if (images[0]) return `<div class="${cls}"><img src="${esc(images[0])}" alt="${esc((p && p.name) || "")}"></div>`;
+  return `<div class="${cls}">${fallback}</div>`;
+}
+
+function galleryHTML(p) {
+  const images = productImages(p);
+  const fallback = ICONS[p.category] || ICONS.bed;
+  if (!images.length) {
+    return `<div class="gallery">${fallback}</div>`;
+  }
+  const thumbs = images.map((url, i) =>
+    `<button type="button" class="gallery-thumb ${i === 0 ? "is-active" : ""}" data-gallery-src="${esc(url)}"><img src="${esc(url)}" alt=""></button>`
+  ).join("");
+  return `<div class="gallery has-photo">
+    <div class="gallery-main"><img id="gallery-main-img" src="${esc(images[0])}" alt="${esc(p.name)}"></div>
+    ${images.length > 1 ? `<div class="gallery-thumbs">${thumbs}</div>` : ""}
+  </div>`;
+}
+
+function bindGallery(root) {
+  const main = root.querySelector("#gallery-main-img");
+  if (!main) return;
+  root.querySelectorAll("[data-gallery-src]").forEach((btn) => {
+    const show = () => {
+      const src = btn.getAttribute("data-gallery-src");
+      if (!src || main.getAttribute("src") === src) return;
+      main.style.opacity = "0";
+      setTimeout(() => {
+        main.src = src;
+        main.style.opacity = "1";
+      }, 160);
+      root.querySelectorAll("[data-gallery-src]").forEach((el) => el.classList.toggle("is-active", el === btn));
+    };
+    btn.addEventListener("mouseenter", show);
+    btn.addEventListener("focus", show);
+    btn.addEventListener("click", show);
+  });
+}
+
+let catalogHydrate = null;
+function hydrateCatalog() {
+  if (catalogHydrate) return catalogHydrate;
+  catalogHydrate = api("/api/products").then((data) => {
+    (data.products || []).forEach((row) => {
+      const local = productById(row.id);
+      if (!local) return;
+      if (row.thumbnail) local.thumbnail = row.thumbnail;
+      if (row.images) local.images = row.images;
+      if (row.desc) local.desc = row.desc;
+      if (row.stock != null) local.stock = row.stock;
+      if (row.isHygiene != null) local.isHygiene = row.isHygiene;
+    });
+    renderCart();
+    if (typeof window.__renderCheckout === "function") window.__renderCheckout();
+  }).catch(() => {});
+  return catalogHydrate;
+}
+
+function maskName(name) {
+  const text = String(name || "").trim();
+  if (!text) return "구매자";
+  if (text.length === 1) return "*";
+  if (text.length === 2) return text[0] + "*";
+  return text[0] + "*" + text.slice(-1);
+}
+
+function starIcons(n) {
+  const rating = Math.max(0, Math.min(5, Math.round(Number(n) || 0)));
+  return "★".repeat(rating) + "☆".repeat(5 - rating);
+}
+
 function productCard(p) {
   const g = productGroup(p);
+  const images = productImages(p);
+  const visual = images[0]
+    ? `<img src="${esc(images[0])}" alt="${esc(p.name)}">`
+    : (ICONS[p.category] || ICONS.bed);
   return `<article class="card">
     <a href="product.html#id=${p.id}">
       <div class="thumb">
         <div class="badges">${(p.badges || []).map((b) => `<span class="badge ${b}">${badgeLabel(b)}</span>`).join("")}</div>
-        ${ICONS[p.category] || ICONS.bed}
+        ${visual}
       </div>
     </a>
     <div class="card-body">
@@ -597,17 +706,17 @@ function renderCart() {
     const checked = !hadBoxes || prev.has(String(p.id));
     return `<div class="cart-item">
       <label class="cart-check"><input type="checkbox" data-cart-check="${esc(p.id)}" ${checked ? "checked" : ""} /></label>
-      <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
+      ${thumbHTML(p, "cart-item-thumb")}
       <div>
         <b>${esc(p.name)}</b>
         <div>${isWelfare(p) ? "본인부담" : "판매가"} ${won(pay)}</div>
         <div class="qty-ctrl">
-          <button type="button" data-qty="-1" data-qty-id="${esc(p.id)}" aria-label="수량 줄이기">−</button>
+          <button type="button" data-qty="-1" data-qty-id="${esc(p.id)}" aria-label="수량 줄이기" ${i.qty <= 1 ? "disabled" : ""}>−</button>
           <span>${i.qty}</span>
           <button type="button" data-qty="1" data-qty-id="${esc(p.id)}" aria-label="수량 늘리기">+</button>
         </div>
       </div>
-      <button class="icon-btn" data-remove="${esc(p.id)}">✕</button>
+      <button class="icon-btn cart-remove" data-remove="${esc(p.id)}" aria-label="상품 삭제">삭제</button>
     </div>`;
   }).join("");
   updateCartTotals();
@@ -645,6 +754,7 @@ function mountShell(page) {
   }).catch(() => {});
   updateCartCount();
   renderCart();
+  hydrateCatalog();
   refreshAuth();
   applyRegistrationGate();
   if (window.__shellBound) return;
@@ -663,10 +773,13 @@ function mountShell(page) {
     const qtyBtn = e.target.closest("[data-qty]");
     if (qtyBtn) {
       e.preventDefault();
+      if (qtyBtn.disabled) return;
       const id = qtyBtn.getAttribute("data-qty-id");
       const step = Number(qtyBtn.getAttribute("data-qty")) || 0;
       const item = cart().find((row) => String(row.id) === String(id));
-      setCartQty(id, (item && item.qty ? item.qty : 1) + step);
+      const current = item && item.qty ? item.qty : 1;
+      if (step < 0 && current <= 1) return;
+      setCartQty(id, current + step);
       return;
     }
     const remove = e.target.closest("[data-remove]");
@@ -793,45 +906,66 @@ function initShop() {
       `<a class="chip ${c.id === category ? "active" : ""}" href="${shopQuery({ group, category: c.id, mode, q })}">${c.name}</a>`
     ).join("");
   }
-  const list = productsByFilter({ group, category, mode, q });
-  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-  const safePage = Math.min(page, pages);
-  const slice = list.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const title = document.querySelector("#shop-title");
-  if (title) {
-    title.textContent = q
-      ? `"${q}" 검색 결과`
-      : category !== "all"
-        ? categoryName(category)
-        : group === "uninsured"
-          ? "비급여 · 일반의료기 · 노인생활용품"
-          : group === "disability"
-            ? "장애인 용품"
-            : mode === "rent"
-              ? "복지용구 대여"
-              : group === "welfare"
-                ? "복지용구"
-                : "전체 상품";
-  }
-  const count = document.querySelector("#shop-count");
-  if (count) count.textContent = `${list.length}개 상품${pages > 1 ? ` · ${safePage}/${pages}페이지` : ""}`;
-  renderCards("#shop-grid", slice);
-  const pager = document.querySelector("#shop-pager");
-  if (pager) {
-    if (pages <= 1) pager.innerHTML = "";
-    else {
-      const links = [];
-      if (safePage > 1) links.push(`<a class="chip" href="${shopQuery({ group, category, mode, q, page: safePage - 1 })}">이전</a>`);
-      for (let i = 1; i <= pages; i++) {
-        if (pages > 8 && Math.abs(i - safePage) > 2 && i !== 1 && i !== pages) {
-          if (links[links.length - 1] !== `<span class="chip muted">…</span>`) links.push(`<span class="chip muted">…</span>`);
-          continue;
-        }
-        links.push(`<a class="chip ${i === safePage ? "active" : ""}" href="${shopQuery({ group, category, mode, q, page: i })}">${i}</a>`);
-      }
-      if (safePage < pages) links.push(`<a class="chip" href="${shopQuery({ group, category, mode, q, page: safePage + 1 })}">다음</a>`);
-      pager.innerHTML = links.join("");
+  function paintShop(list) {
+    const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+    const safePage = Math.min(page, pages);
+    const slice = list.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+    const title = document.querySelector("#shop-title");
+    if (title) {
+      title.textContent = q
+        ? `"${q}" 검색 결과`
+        : category !== "all"
+          ? categoryName(category)
+          : group === "uninsured"
+            ? "비급여 · 일반의료기 · 노인생활용품"
+            : group === "disability"
+              ? "장애인 용품"
+              : mode === "rent"
+                ? "복지용구 대여"
+                : group === "welfare"
+                  ? "복지용구"
+                  : "전체 상품";
     }
+    const count = document.querySelector("#shop-count");
+    if (count) count.textContent = `${list.length}개 상품${pages > 1 ? ` · ${safePage}/${pages}페이지` : ""}`;
+    renderCards("#shop-grid", slice);
+    const pager = document.querySelector("#shop-pager");
+    if (pager) {
+      if (pages <= 1) pager.innerHTML = "";
+      else {
+        const links = [];
+        if (safePage > 1) links.push(`<a class="chip" href="${shopQuery({ group, category, mode, q, page: safePage - 1 })}">이전</a>`);
+        for (let i = 1; i <= pages; i++) {
+          if (pages > 8 && Math.abs(i - safePage) > 2 && i !== 1 && i !== pages) {
+            if (links[links.length - 1] !== `<span class="chip muted">…</span>`) links.push(`<span class="chip muted">…</span>`);
+            continue;
+          }
+          links.push(`<a class="chip ${i === safePage ? "active" : ""}" href="${shopQuery({ group, category, mode, q, page: i })}">${i}</a>`);
+        }
+        if (safePage < pages) links.push(`<a class="chip" href="${shopQuery({ group, category, mode, q, page: safePage + 1 })}">다음</a>`);
+        pager.innerHTML = links.join("");
+      }
+    }
+  }
+  paintShop(productsByFilter({ group, category, mode, q }));
+  if (q) {
+    api("/api/products/search?q=" + encodeURIComponent(q)).then((data) => {
+      const next = [];
+      const seen = {};
+      (data.products || []).forEach((row) => {
+        const local = productById(row.id);
+        if (!local || seen[local.id]) return;
+        if (row.images) local.images = row.images;
+        if (row.thumbnail) local.thumbnail = row.thumbnail;
+        const pg = productGroup(local);
+        if (group && group !== "all" && pg !== group) return;
+        if (category && category !== "all" && local.category !== category) return;
+        if (mode && mode !== "all" && local.mode !== mode && local.mode !== "both") return;
+        seen[local.id] = true;
+        next.push(local);
+      });
+      if (next.length) paintShop(next);
+    }).catch(() => {});
   }
   if (!window.__shopHashBound) {
     window.__shopHashBound = true;
@@ -839,6 +973,23 @@ function initShop() {
       if (/shop/i.test(location.pathname)) initShop();
     });
   }
+}
+
+function bindProductTabs(root) {
+  const tabs = root.querySelectorAll("[data-product-tab]");
+  function show(name) {
+    tabs.forEach((tab) => {
+      const on = tab.getAttribute("data-product-tab") === name;
+      tab.classList.toggle("is-active", on);
+    });
+    root.querySelectorAll("[data-product-pane]").forEach((pane) => {
+      pane.hidden = pane.getAttribute("data-product-pane") !== name;
+    });
+  }
+  tabs.forEach((tab) => {
+    tab.onclick = () => show(tab.getAttribute("data-product-tab"));
+  });
+  show("detail");
 }
 
 function initProduct() {
@@ -865,16 +1016,17 @@ function initProduct() {
       : `<div class="full">판매가</div>
           <div class="now">${won(p.price)}</div>
           <small>비급여 일반 구매 상품입니다. 장기요양 한도와 별개입니다.</small>`;
+  const specRows = Object.entries(p.specs || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
   box.innerHTML = `
     <div class="crumbs"><a href="index.html">홈</a> · <a href="shop.html#group=${g}">${groupName(g)}</a> · ${categoryName(p.category)}</div>
     <div class="product-layout">
-      <div class="gallery">${ICONS[p.category] || ICONS.bed}</div>
+      ${galleryHTML(p)}
       <div class="buybox">
-        <div class="meta">★ ${p.rating} · 후기 ${p.reviews} · ${groupName(g)} · ${p.mode === "rent" ? "대여상품" : "구매상품"}</div>
+        <div class="meta" id="product-meta">★ ${p.rating} · 후기 ${p.reviews} · ${groupName(g)} · ${p.mode === "rent" ? "대여상품" : "구매상품"}</div>
         <h1>${p.name}</h1>
         <p>${p.desc}</p>
         <div class="price-box">${priceBox}</div>
-        <ul class="spec">${Object.entries(p.specs).map(([k, v]) => `<li><span>${k}</span><b>${v}</b></li>`).join("")}</ul>
+        <ul class="spec">${Object.entries(p.specs || {}).map(([k, v]) => `<li><span>${k}</span><b>${v}</b></li>`).join("")}</ul>
         <div class="qty">
           <button type="button" id="minus">−</button>
           <strong id="qty">1</strong>
@@ -885,25 +1037,160 @@ function initProduct() {
           <a class="btn btn-teal btn-lg" href="consult.html?item=${encodeURIComponent(p.name)}">바로 상담</a>
         </div>
         <div id="stock-note"></div>
-        <div class="policy-box">
-          <h3>교환·환불 안내</h3>
-          <p>전자상거래법에 따라 상품 수령 후 7일 이내 청약철회(반품)가 가능합니다. 단순 변심 반품의 배송비는 고객 부담, 제품 하자의 배송비는 판매자가 부담합니다.</p>
-          <p class="hygiene-note" hidden>피부 접촉·멸균 소모품·위생용품은 포장 개봉 시 단순 변심 반품이 제한됩니다.</p>
-        </div>
+      </div>
+    </div>
+    <nav class="product-tabs" id="product-tabs">
+      <button type="button" class="product-tab is-active" data-product-tab="detail">상세정보</button>
+      <button type="button" class="product-tab" data-product-tab="review" id="tab-review-btn">상품후기 (${p.reviews || 0})</button>
+      <button type="button" class="product-tab" data-product-tab="qna" id="tab-qna-btn">상품문의 (0)</button>
+      <button type="button" class="product-tab" data-product-tab="shipping">배송/교환/환불</button>
+    </nav>
+    <section class="product-pane" data-product-pane="detail">
+      <h2>상세정보</h2>
+      <p>${esc(p.desc)}</p>
+      <table class="spec-table">${specRows || "<tr><th>상품명</th><td>" + esc(p.name) + "</td></tr>"}</table>
+    </section>
+    <section class="product-pane" data-product-pane="review" hidden>
+      <div class="review-summary" id="review-summary">★ ${p.rating} / 5.0 · 후기 ${p.reviews || 0}건</div>
+      <p><button class="btn btn-teal" type="button" id="review-write-btn">구매 후기 작성</button></p>
+      <div id="review-list"><p class="muted">후기를 불러오는 중…</p></div>
+    </section>
+    <section class="product-pane" data-product-pane="qna" hidden>
+      <p><button class="btn btn-teal" type="button" id="qna-write-btn">문의하기</button></p>
+      <form class="form" id="qna-form" hidden>
+        <label>문의 내용</label>
+        <textarea name="content" rows="4" required placeholder="상품에 대해 궁금한 점을 남겨 주세요."></textarea>
+        <label class="check"><input type="checkbox" name="is_secret" /> 비밀글</label>
+        <p class="form-error" id="qna-error" hidden></p>
+        <button class="btn btn-teal" type="submit">문의 등록</button>
+      </form>
+      <div id="qna-list"><p class="muted">문의를 불러오는 중…</p></div>
+    </section>
+    <section class="product-pane" data-product-pane="shipping" hidden>
+      <h2>배송 / 교환 / 환불 안내</h2>
+      <ul>
+        <li>기본 배송비: 3,000원 (50,000원 이상 결제 시 무료배송)</li>
+        <li>배송 기간: 영업일 기준 1~3일 소요 (도서산간 추가 소요 가능)</li>
+        <li>교환/반품: 수령 후 7일 이내 가능. 단순 변심 시 왕복 택배비 6,000원</li>
+      </ul>
+      <div class="policy-box">
+        <h3>의료/위생용품 특약</h3>
+        <p class="hygiene-note">환자용 기저귀, 매트리스, 욕창예방기구 등 위생용품은 개봉 후 단순 변심 반품이 불가합니다. 피부 접촉·멸균 소모품도 포장 개봉 시 반품이 제한됩니다.</p>
+      </div>
+    </section>
+    <div class="admin-modal" id="review-modal" hidden>
+      <div class="postcode-dim" data-review-close></div>
+      <div class="admin-modal-box">
+        <h2>구매 후기 작성</h2>
+        <form class="form" id="review-form">
+          <label>별점</label>
+          <select name="rating">
+            <option value="5">★★★★★ 5</option>
+            <option value="4">★★★★☆ 4</option>
+            <option value="3">★★★☆☆ 3</option>
+            <option value="2">★★☆☆☆ 2</option>
+            <option value="1">★☆☆☆☆ 1</option>
+          </select>
+          <label>구매 옵션</label>
+          <input name="option_text" placeholder="예: 대여 / 본품" />
+          <label>후기 내용</label>
+          <textarea name="content" rows="4" required></textarea>
+          <p class="form-error" id="review-error" hidden></p>
+          <div class="card-actions">
+            <button class="btn btn-teal" type="submit">등록</button>
+            <button class="btn btn-outline" type="button" data-review-close>닫기</button>
+          </div>
+        </form>
       </div>
     </div>`;
+  bindGallery(box);
+  bindProductTabs(box);
   let qty = 1;
   box.querySelector("#plus").onclick = () => { qty += 1; box.querySelector("#qty").textContent = qty; };
   box.querySelector("#minus").onclick = () => { qty = Math.max(1, qty - 1); box.querySelector("#qty").textContent = qty; };
   box.querySelector("#add-btn").onclick = () => addToCart(p.id, qty);
+
+  async function loadReviews() {
+    const data = await api("/api/products/" + encodeURIComponent(p.id) + "/reviews");
+    const count = data.count || 0;
+    const avg = data.average || p.rating || 0;
+    const reviewBtn = box.querySelector("#tab-review-btn");
+    if (reviewBtn) reviewBtn.textContent = "상품후기 (" + count + ")";
+    const summary = box.querySelector("#review-summary");
+    if (summary) summary.innerHTML = `<span class="star-row">${starIcons(avg)}</span> <b>${avg.toFixed ? avg.toFixed(1) : avg}</b> / 5.0 · 총 ${count}건`;
+    const meta = box.querySelector("#product-meta");
+    if (meta) meta.textContent = `★ ${avg} · 후기 ${count} · ${groupName(g)} · ${p.mode === "rent" ? "대여상품" : "구매상품"}`;
+    const list = box.querySelector("#review-list");
+    if (!data.reviews || !data.reviews.length) {
+      list.innerHTML = `<p class="muted">아직 등록된 후기가 없습니다.</p>`;
+      return;
+    }
+    list.innerHTML = data.reviews.map((r) => `
+      <article class="review-card">
+        <div class="star-row">${starIcons(r.rating)}</div>
+        <b>${esc(r.author || maskName(r.authorName))}</b>
+        <small class="muted">${esc(String(r.createdAt || "").replace("T", " ").slice(0, 16))}${r.optionText ? " · " + esc(r.optionText) : ""}</small>
+        <p>${esc(r.content)}</p>
+      </article>`).join("");
+  }
+
+  async function loadQna(user) {
+    const data = await api("/api/products/" + encodeURIComponent(p.id) + "/inquiries");
+    const items = data.inquiries || [];
+    const qnaBtn = box.querySelector("#tab-qna-btn");
+    if (qnaBtn) qnaBtn.textContent = "상품문의 (" + items.length + ")";
+    const list = box.querySelector("#qna-list");
+    if (!items.length) {
+      list.innerHTML = `<p class="muted">등록된 문의가 없습니다.</p>`;
+      return;
+    }
+    list.innerHTML = items.map((q) => `
+      <article class="qna-card">
+        <div>
+          ${q.isSecret ? `<span class="lock-icon" title="비밀글">🔒</span>` : ""}
+          <span class="qna-badge ${q.status === "ANSWERED" ? "is-done" : ""}">${q.status === "ANSWERED" ? "답변완료" : "답변대기"}</span>
+          <b>${esc(q.author)}</b>
+          <small class="muted">${esc(String(q.createdAt || "").replace("T", " ").slice(0, 16))}</small>
+        </div>
+        <p>${esc(q.content)}</p>
+        ${q.answer ? `<div class="qna-answer"><b>판매자 답변</b><p>${esc(q.answer)}</p></div>` : ""}
+        ${isAdminUser(user) && !q.answer ? `<form class="form" data-qna-answer="${esc(q.id)}"><input name="answer" placeholder="답변 입력" required /><button class="btn btn-outline" type="submit">답변 저장</button></form>` : ""}
+      </article>`).join("");
+    list.querySelectorAll("[data-qna-answer]").forEach((form) => {
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await api("/api/admin/inquiries/" + encodeURIComponent(form.getAttribute("data-qna-answer")) + "/answer", {
+            method: "POST",
+            body: JSON.stringify({ answer: form.answer.value })
+          });
+          toast("답변을 저장했습니다.");
+          loadQna(user);
+        } catch (err) {
+          toast(err.message);
+        }
+      };
+    });
+  }
+
+  hydrateCatalog().then(() => {
+    const gallery = box.querySelector(".gallery");
+    if (gallery) gallery.outerHTML = galleryHTML(p);
+    bindGallery(box);
+  });
+
   api("/api/products/" + encodeURIComponent(p.id)).then((data) => {
     const row = data.product || {};
+    if (row.images) p.images = row.images;
+    if (row.thumbnail) p.thumbnail = row.thumbnail;
+    const gallery = box.querySelector(".gallery");
+    if (gallery) gallery.outerHTML = galleryHTML(p);
+    bindGallery(box);
     const stock = Number(row.stock);
     const note = box.querySelector("#stock-note");
     const add = box.querySelector("#add-btn");
     if (row.isHygiene) {
-      const hy = box.querySelector(".hygiene-note");
-      if (hy) hy.hidden = false;
+      box.querySelectorAll(".hygiene-note").forEach((hy) => { hy.hidden = false; });
     }
     if (stock === 0) {
       note.innerHTML = '<p class="soldout">품절</p>';
@@ -912,16 +1199,91 @@ function initProduct() {
     } else if (stock <= 10) {
       note.innerHTML = '<p class="low-stock">품절 임박: 잔여 ' + stock + "개 남음</p>";
     }
+    const reviewBtn = box.querySelector("#tab-review-btn");
+    if (reviewBtn && row.reviewCount != null) reviewBtn.textContent = "상품후기 (" + row.reviewCount + ")";
+    const qnaBtn = box.querySelector("#tab-qna-btn");
+    if (qnaBtn && row.qnaCount != null) qnaBtn.textContent = "상품문의 (" + row.qnaCount + ")";
     refreshAuth().then((user) => {
-      if (user && user.role === "admin") {
+      if (isAdminUser(user)) {
         const link = document.createElement("a");
         link.href = "admin.html#id=" + encodeURIComponent(p.id);
         link.className = "admin-edit";
         link.textContent = "수정하기";
         box.querySelector(".buybox").appendChild(link);
       }
+      loadReviews().catch(() => {});
+      loadQna(user).catch(() => {});
     });
-  }).catch(() => {});
+  }).catch(() => {
+    loadReviews().catch(() => {});
+    loadQna(null).catch(() => {});
+  });
+
+  const modal = box.querySelector("#review-modal");
+  box.querySelector("#review-write-btn").onclick = () => {
+    if (!window.currentUser) {
+      location.href = "login.html#next=" + encodeURIComponent("product.html#id=" + p.id);
+      return;
+    }
+    if (modal) modal.hidden = false;
+  };
+  box.querySelectorAll("[data-review-close]").forEach((el) => {
+    el.onclick = () => { if (modal) modal.hidden = true; };
+  });
+  const reviewForm = box.querySelector("#review-form");
+  if (reviewForm) {
+    reviewForm.onsubmit = async (e) => {
+      e.preventDefault();
+      showFormError("#review-error", "");
+      try {
+        await api("/api/products/" + encodeURIComponent(p.id) + "/reviews", {
+          method: "POST",
+          body: JSON.stringify({
+            rating: reviewForm.rating.value,
+            option_text: reviewForm.option_text.value,
+            content: reviewForm.content.value
+          })
+        });
+        toast("후기를 등록했습니다.");
+        if (modal) modal.hidden = true;
+        reviewForm.reset();
+        loadReviews();
+      } catch (err) {
+        showFormError("#review-error", err.message);
+      }
+    };
+  }
+  const qnaBtn = box.querySelector("#qna-write-btn");
+  const qnaForm = box.querySelector("#qna-form");
+  if (qnaBtn && qnaForm) {
+    qnaBtn.onclick = () => {
+      if (!window.currentUser) {
+        location.href = "login.html#next=" + encodeURIComponent("product.html#id=" + p.id);
+        return;
+      }
+      qnaForm.hidden = !qnaForm.hidden;
+    };
+    qnaForm.onsubmit = async (e) => {
+      e.preventDefault();
+      showFormError("#qna-error", "");
+      try {
+        await api("/api/products/" + encodeURIComponent(p.id) + "/inquiries", {
+          method: "POST",
+          body: JSON.stringify({
+            content: qnaForm.content.value,
+            is_secret: qnaForm.is_secret.checked
+          })
+        });
+        toast("문의를 등록했습니다.");
+        qnaForm.reset();
+        qnaForm.hidden = true;
+        loadQna(window.currentUser);
+      } catch (err) {
+        showFormError("#qna-error", err.message);
+      }
+    };
+  }
+
   const related = PRODUCTS.filter((x) => x.category === p.category && x.id !== p.id);
   renderCards("#related", (related.length ? related : PRODUCTS.filter((x) => productGroup(x) === g && x.id !== p.id)).slice(0, 4));
 }
@@ -1071,6 +1433,21 @@ function initSignup() {
   form.onsubmit = async (e) => {
     e.preventDefault();
     showFormError("#signup-error", "");
+    const emailRule = emailRuleError(form.email.value);
+    if (emailRule) {
+      showFormError("#signup-error", emailRule);
+      return;
+    }
+    const nameRule = nameRuleError(form.name.value);
+    if (nameRule) {
+      showFormError("#signup-error", nameRule);
+      return;
+    }
+    const phoneRule = phoneRuleError(form.phone.value);
+    if (phoneRule) {
+      showFormError("#signup-error", phoneRule);
+      return;
+    }
     if (form.password.value !== form.passwordConfirm.value) {
       showFormError("#signup-error", "비밀번호가 일치하지 않습니다.");
       return;
@@ -1285,8 +1662,117 @@ async function renderPasswordHelp() {
   });
 }
 
+const SHIP_CARRIERS = [
+  { code: "kr.cjlogistics", name: "CJ대한통운" },
+  { code: "kr.epost", name: "우체국택배" },
+  { code: "kr.hanjin", name: "한진택배" },
+  { code: "kr.logen", name: "로젠택배" },
+  { code: "kr.lotte", name: "롯데택배" }
+];
+const ORDER_PAGE_SIZE = 8;
+
+function cancelReasonLine(order) {
+  const status = String(order.status || "");
+  if (status !== "CANCELLED" && status !== "CANCELED") return "";
+  const reason = String(order.cancelReason || order.cancel_reason || "").trim();
+  const by = String(order.cancelledBy || order.cancelled_by || "").toUpperCase();
+  if (by === "ADMIN") {
+    return `<span class="cancel-desc text-danger">취소 사유: [관리자 직권 취소] ${esc(reason)}</span>`;
+  }
+  return `<span class="cancel-desc text-muted">취소 사유: ${esc(reason || "고객 직접 취소")}</span>`;
+}
+
+function shipFieldsHtml(order, carriers, visible) {
+  const list = (carriers && carriers.length ? carriers : SHIP_CARRIERS);
+  const opts = list.map((c) =>
+    `<option value="${esc(c.code)}" ${c.code === order.carrier ? "selected" : ""}>${esc(c.name)}</option>`
+  ).join("");
+  return `<div class="order-admin ship-fields" data-ship="${esc(order.id)}" ${visible ? "" : "hidden"}>
+    <select data-carrier aria-label="택배사">${opts}</select>
+    <input data-tracking placeholder="송장번호" value="${esc(order.trackingNumber || "")}" />
+    <button class="btn btn-teal" type="button" data-ship-save="${esc(order.id)}">발송 저장</button>
+  </div>`;
+}
+
+function bindMypageTabs() {
+  const tabs = document.querySelectorAll("[data-mypage-tab]");
+  if (!tabs.length) return;
+  function show(name) {
+    tabs.forEach((tab) => {
+      const on = tab.getAttribute("data-mypage-tab") === name;
+      tab.classList.toggle("is-active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll("[data-mypage-pane]").forEach((pane) => {
+      pane.hidden = pane.getAttribute("data-mypage-pane") !== name;
+    });
+  }
+  tabs.forEach((tab) => {
+    tab.onclick = () => show(tab.getAttribute("data-mypage-tab"));
+  });
+  if (location.hash === "#profile") show("profile");
+  else show("orders");
+}
+
+function mypageOrderCard(o, user, carriers) {
+  const first = (o.items || [])[0];
+  const extra = Math.max(0, (o.items || []).length - 1);
+  const title = first
+    ? esc(first.name) + " × " + (first.qty || 1) + (extra ? " 외 " + extra + "건" : "")
+    : (o.type === "consult" ? "상담 신청" : "주문");
+  const items = (o.items || []).map((i) => `${esc(i.name)} × ${i.qty}`).join("<br>");
+  const topics = (o.topics || []).map(esc).join(", ");
+  const canTrack = (o.status === "SHIPPING" || o.status === "SHIPPED" || o.status === "DELIVERED") && (o.trackingUrl || o.trackingNumber);
+  const track = canTrack
+    ? `<a class="btn btn-outline" href="${esc(o.trackingUrl || ("https://tracker.delivery/#/kr.cjlogistics/" + encodeURIComponent(o.trackingNumber)))}" target="_blank" rel="noopener">배송조회</a>`
+    : (o.status === "SHIPPING" || o.status === "PREPARING" ? `<span class="muted">운송장 준비 중</span>` : "");
+  const receipt = o.receiptUrl
+    ? `<a class="btn btn-outline" href="${esc(o.receiptUrl)}" target="_blank" rel="noopener">영수증 보기</a>`
+    : "";
+  const canShip = o.status === "PAID" || o.status === "PREPARING" || o.status === "SHIPPING";
+  const admin = isAdminUser(user)
+    ? `<div class="order-admin">
+        <label>상태
+          <select data-order-status="${esc(o.id)}">
+            ${["READY", "PAID", "PREPARING", "SHIPPING", "DELIVERED", "CANCEL_REQUESTED", "CANCELLED"].map((s) =>
+              `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
+            ).join("")}
+          </select>
+        </label>
+        ${canShip ? shipFieldsHtml(o, carriers, o.status === "SHIPPING") : ""}
+      </div>`
+    : "";
+  return `<article class="panel order-card" id="order-${esc(o.id)}">
+    <div class="order-top">
+      <div>
+        <b>${esc(o.number)}</b>
+        <span class="status-pill ${statusClass(o.status)}">${statusLabel(o.status)}</span>
+      </div>
+      <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
+    </div>
+    ${cancelReasonLine(o)}
+    <p>${title}</p>
+    ${o.total ? `<p><b>${won(o.total)}</b>${o.shippingFee ? ` <small class="muted">(배송비 ${won(o.shippingFee)} 포함)</small>` : ""}</p>` : ""}
+    <p class="muted">${o.type === "consult" ? "상담 신청" : "상품 주문"} · ${esc(o.name || "")}${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
+    ${o.address ? `<p class="muted">${esc(o.address)}</p>` : ""}
+    ${topics ? `<p>관심 품목: ${topics}</p>` : ""}
+    ${items ? `<p>${items}</p>` : ""}
+    ${o.memo ? `<p class="muted">${esc(o.memo)}</p>` : ""}
+    <div class="order-actions">
+      ${track}
+      ${receipt}
+      <a class="btn btn-outline" href="#order-${esc(o.id)}">상세보기</a>
+      ${o.cancel && o.cancel.canCancel ? `<button class="btn btn-outline" type="button" data-cancel-order="${esc(o.id)}">주문 취소</button>` : ""}
+      ${o.cancel && o.cancel.canRequest ? `<button class="btn btn-outline" type="button" data-cancel-request="${esc(o.id)}">취소 요청</button>` : ""}
+    </div>
+    ${o.cancel && o.cancel.message ? `<p class="muted">${esc(o.cancel.message)}</p>` : ""}
+    ${admin}
+  </article>`;
+}
+
 function initAccount() {
   mountShell("account");
+  bindMypageTabs();
   refreshAuth().then(async (user) => {
     if (!user) {
       location.href = "login.html#next=mypage.html";
@@ -1297,18 +1783,31 @@ function initAccount() {
     if (user.email) bits.push(user.email);
     else if (user.username) bits.push(user.username);
     bits.push(user.phone || "휴대폰 미등록");
-    if (user.role === "admin") bits.push("관리자");
+    if (isAdminUser(user)) bits.push("관리자");
     document.querySelector("#account-phone").textContent = bits.join(" · ");
+    const adminPath = user.adminPath || "/hyundai-control-99";
     const adminLink = document.querySelector("#admin-link");
-    if (adminLink && user.role === "admin") {
-      adminLink.hidden = false;
-      if (user.adminPath) adminLink.href = user.adminPath;
+    const dashLink = document.querySelector("#admin-dash-link");
+    const adminBanner = document.querySelector("#admin-mypage-banner");
+    if (isAdminUser(user)) {
+      if (adminLink) {
+        adminLink.hidden = false;
+        adminLink.href = adminPath;
+      }
+      if (dashLink) dashLink.href = adminPath;
+      if (adminBanner) adminBanner.hidden = false;
+      const extras = document.querySelector("#customer-account-extras");
+      if (extras) extras.hidden = true;
+      const addr = document.querySelector("#profile-address-block");
+      if (addr) addr.hidden = true;
+      const lead = document.querySelector("#account-lead");
+      if (lead) lead.textContent = "현재 관리자 계정으로 접속 중입니다.";
+      renderPasswordHelp();
     }
-    if (user.role === "admin") renderPasswordHelp();
     const logoutBtn = document.querySelector("#logout-btn");
     if (logoutBtn) logoutBtn.onclick = () => logout();
     const withdrawBtn = document.querySelector("#withdraw-btn");
-    if (withdrawBtn) {
+    if (withdrawBtn && !isAdminUser(user)) {
       withdrawBtn.onclick = async () => {
         if (!confirm("정말 탈퇴하시겠습니까? 이름과 연락처는 바로 삭제됩니다.")) return;
         await api("/api/me/withdraw", { method: "POST", body: "{}" });
@@ -1338,10 +1837,20 @@ function initAccount() {
       if (profile.zipcode) profile.zipcode.value = user.zipcode || "";
       if (profile.address_basic) profile.address_basic.value = user.addressBasic || "";
       if (profile.address_detail) profile.address_detail.value = user.addressDetail || "";
-      bindPostcode(document.querySelector("#profile-postcode-btn"), profile);
+      if (!isAdminUser(user)) bindPostcode(document.querySelector("#profile-postcode-btn"), profile);
       profile.onsubmit = async (e) => {
         e.preventDefault();
         showFormError("#profile-error", "");
+        const nameRule = nameRuleError(profile.name.value);
+        if (nameRule) {
+          showFormError("#profile-error", nameRule);
+          return;
+        }
+        const phoneRule = phoneRuleError(profile.phone.value);
+        if (phoneRule) {
+          showFormError("#profile-error", phoneRule);
+          return;
+        }
         const nextPw = profile.newPassword.value || "";
         const rule = passwordRuleError(nextPw);
         if (nextPw && rule) {
@@ -1355,10 +1864,10 @@ function initAccount() {
               name: profile.name.value,
               phone: profile.phone.value,
               email: profile.email ? profile.email.value : user.email,
-              address: profile.address ? profile.address.value : "",
-              zipcode: profile.zipcode ? profile.zipcode.value : "",
-              address_basic: profile.address_basic ? profile.address_basic.value : "",
-              address_detail: profile.address_detail ? profile.address_detail.value : "",
+              address: isAdminUser(user) ? (user.address || "") : (profile.address ? profile.address.value : ""),
+              zipcode: isAdminUser(user) ? (user.zipcode || "") : (profile.zipcode ? profile.zipcode.value : ""),
+              address_basic: isAdminUser(user) ? (user.addressBasic || "") : (profile.address_basic ? profile.address_basic.value : ""),
+              address_detail: isAdminUser(user) ? (user.addressDetail || "") : (profile.address_detail ? profile.address_detail.value : ""),
               currentPassword: profile.currentPassword.value,
               password: profile.newPassword.value
             })
@@ -1375,68 +1884,38 @@ function initAccount() {
     try {
       const data = await api("/api/orders");
       const box = document.querySelector("#order-list");
+      const moreWrap = document.querySelector("#order-more-wrap");
+      const moreBtn = document.querySelector("#order-more-btn");
       if (!box) return;
-      if (!data.orders.length) {
+      const orders = data.orders || [];
+      const carriers = data.carriers || SHIP_CARRIERS;
+      if (!orders.length) {
         box.innerHTML = `<div class="empty-cta"><p class="empty">아직 주문하신 내역이 없습니다.</p><a class="btn btn-teal" href="shop.html">상품 보러가기</a></div>`;
+        if (moreWrap) moreWrap.hidden = true;
         return;
       }
-      box.innerHTML = data.orders.map((o) => {
-        const first = (o.items || [])[0];
-        const extra = Math.max(0, (o.items || []).length - 1);
-        const title = first
-          ? esc(first.name) + " × " + (first.qty || 1) + (extra ? " 외 " + extra + "건" : "")
-          : (o.type === "consult" ? "상담 신청" : "주문");
-        const items = (o.items || []).map((i) => `${esc(i.name)} × ${i.qty}`).join("<br>");
-        const topics = (o.topics || []).map(esc).join(", ");
-        const canTrack = (o.status === "SHIPPING" || o.status === "SHIPPED" || o.status === "DELIVERED") && (o.trackingUrl || o.trackingNumber);
-        const track = canTrack
-          ? `<a class="btn btn-outline" href="${esc(o.trackingUrl || ("https://tracker.delivery/#/kr.cjlogistics/" + encodeURIComponent(o.trackingNumber)))}" target="_blank" rel="noopener">배송조회</a>`
-          : (o.status === "SHIPPING" || o.status === "PREPARING" ? `<span class="muted">운송장 준비 중</span>` : "");
-        const receipt = o.receiptUrl
-          ? `<a class="btn btn-outline" href="${esc(o.receiptUrl)}" target="_blank" rel="noopener">영수증 보기</a>`
-          : "";
-        const admin = user.role === "admin"
-          ? `<div class="order-admin">
-              <label>상태
-                <select data-order-status="${esc(o.id)}">
-                  ${["READY", "PAID", "PREPARING", "SHIPPING", "DELIVERED", "CANCEL_REQUESTED", "CANCELLED"].map((s) =>
-                    `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
-                  ).join("")}
-                </select>
-              </label>
-            </div>`
-          : "";
-        return `<article class="panel order-card" id="order-${esc(o.id)}">
-          <div class="order-top">
-            <div>
-              <b>${esc(o.number)}</b>
-              <span class="status-pill ${statusClass(o.status)}">${statusLabel(o.status)}</span>
-            </div>
-            <small>${esc((o.createdAt || "").replace("T", " ").slice(0, 16))}</small>
-          </div>
-          ${o.status === "CANCELLED" && o.cancelledBy === "ADMIN" && o.cancelReason
-            ? `<p class="muted">관리자 취소: ${esc(o.cancelReason)}</p>` : ""}
-          <p>${title}</p>
-          ${o.total ? `<p><b>${won(o.total)}</b>${o.shippingFee ? ` <small class="muted">(배송비 ${won(o.shippingFee)} 포함)</small>` : ""}</p>` : ""}
-          <p class="muted">${o.type === "consult" ? "상담 신청" : "상품 주문"} · ${esc(o.name || "")}${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
-          ${o.address ? `<p class="muted">${esc(o.address)}</p>` : ""}
-          ${topics ? `<p>관심 품목: ${topics}</p>` : ""}
-          ${items ? `<p>${items}</p>` : ""}
-          ${o.memo ? `<p class="muted">${esc(o.memo)}</p>` : ""}
-          <div class="order-actions">
-            ${track}
-            ${receipt}
-            <a class="btn btn-outline" href="#order-${esc(o.id)}">상세보기</a>
-            ${o.cancel && o.cancel.canCancel ? `<button class="btn btn-outline" type="button" data-cancel-order="${esc(o.id)}">주문 취소</button>` : ""}
-            ${o.cancel && o.cancel.canRequest ? `<button class="btn btn-outline" type="button" data-cancel-request="${esc(o.id)}">취소 요청</button>` : ""}
-          </div>
-          ${o.cancel && o.cancel.message ? `<p class="muted">${esc(o.cancel.message)}</p>` : ""}
-          ${admin}
-        </article>`;
-      }).join("");
+      let shown = ORDER_PAGE_SIZE;
+      function paintOrders() {
+        box.innerHTML = orders.slice(0, shown).map((o) => mypageOrderCard(o, user, carriers)).join("");
+        if (moreWrap) moreWrap.hidden = shown >= orders.length;
+      }
+      paintOrders();
+      if (moreBtn) {
+        moreBtn.onclick = () => {
+          shown += ORDER_PAGE_SIZE;
+          paintOrders();
+        };
+      }
       box.onchange = async (e) => {
         const sel = e.target.closest("[data-order-status]");
         if (!sel) return;
+        const card = sel.closest("article");
+        const ship = card && card.querySelector("[data-ship]");
+        if (sel.value === "SHIPPING") {
+          if (ship) ship.hidden = false;
+          return;
+        }
+        if (ship) ship.hidden = true;
         try {
           await api("/api/orders/" + sel.dataset.orderStatus, {
             method: "PATCH",
@@ -1448,6 +1927,23 @@ function initAccount() {
         }
       };
       box.onclick = async (e) => {
+        const shipBtn = e.target.closest("[data-ship-save]");
+        if (shipBtn) {
+          const wrap = shipBtn.closest("[data-ship]");
+          const carrier = wrap.querySelector("[data-carrier]").value;
+          const tracking = wrap.querySelector("[data-tracking]").value;
+          try {
+            await api("/api/admin/orders/" + encodeURIComponent(shipBtn.getAttribute("data-ship-save")) + "/ship", {
+              method: "POST",
+              body: JSON.stringify({ carrier, tracking_number: tracking })
+            });
+            toast("발송 저장했습니다.");
+            location.reload();
+          } catch (err) {
+            toast(err.message);
+          }
+          return;
+        }
         const cancelBtn = e.target.closest("[data-cancel-order]");
         const requestBtn = e.target.closest("[data-cancel-request]");
         const btn = cancelBtn || requestBtn;
@@ -1518,12 +2014,12 @@ function initCheckout() {
         const pay = unit * i.qty;
         sum += pay;
         return `<div class="cart-item is-checkout">
-          <div class="thumb" style="aspect-ratio:1;border-radius:12px">${ICONS[p.category] || ICONS.bed}</div>
+          ${thumbHTML(p, "cart-item-thumb")}
           <div>
             <b>${esc(p.name)}</b>
             <div>${won(pay)}</div>
             <div class="qty-ctrl">
-              <button type="button" data-qty="-1" data-qty-id="${esc(p.id)}" aria-label="수량 줄이기">−</button>
+              <button type="button" data-qty="-1" data-qty-id="${esc(p.id)}" aria-label="수량 줄이기" ${i.qty <= 1 ? "disabled" : ""}>−</button>
               <span>${i.qty}</span>
               <button type="button" data-qty="1" data-qty-id="${esc(p.id)}" aria-label="수량 늘리기">+</button>
             </div>
@@ -1816,6 +2312,21 @@ function initAdmin() {
     const id = getParam("id");
     if (id && form) form.id.value = id;
     if (!form) return;
+    if (id) {
+      api("/api/products/" + encodeURIComponent(id)).then((data) => {
+        const row = data.product || {};
+        if (row.name) form.name.value = row.name;
+        if (row.price) form.price.value = row.price;
+        if (row.salePrice != null) form.sale_price.value = row.salePrice;
+        if (row.stock != null) form.stock.value = row.stock;
+        if (row.category) form.category.value = row.category;
+        if (form.thumbnail_url) form.thumbnail_url.value = row.thumbnail || row.image_url || "";
+        if (form.images) form.images.value = (row.images || []).join("\n");
+        if (form.description && row.desc) form.description.value = row.desc;
+        form.is_hygiene_product.checked = Boolean(row.isHygiene);
+        form.is_active.checked = row.isActive !== false;
+      }).catch(() => {});
+    }
     form.onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -1828,6 +2339,9 @@ function initAdmin() {
             sale_price: form.sale_price.value,
             stock: form.stock.value,
             category: form.category.value,
+            thumbnail_url: form.thumbnail_url ? form.thumbnail_url.value : "",
+            images: form.images ? form.images.value : "",
+            description: form.description ? form.description.value : "",
             is_hygiene_product: form.is_hygiene_product.checked,
             is_active: form.is_active.checked
           })
@@ -1859,19 +2373,31 @@ async function loadAdminOrders() {
   async function render() {
     const status = filter ? filter.value : "";
     const data = await api("/api/admin/orders" + (status ? "?status=" + encodeURIComponent(status) : ""));
-    const carriers = data.carriers || [];
-    const carrierOpts = carriers.map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join("");
+    const carriers = data.carriers && data.carriers.length ? data.carriers : SHIP_CARRIERS;
     if (!data.orders.length) {
       box.innerHTML = "<p class=\"muted\">해당 주문이 없습니다.</p>";
       return;
     }
     box.innerHTML = data.orders.map((o) => {
       const items = (o.items || []).map((i) => `${esc(i.name)} × ${i.qty} (${won(i.total || i.unit * i.qty || 0)})`).join("<br>");
-      const shipForm = (o.status === "PAID" || o.status === "PREPARING" || o.status === "SHIPPING")
-        ? `<div class="order-admin" data-ship="${esc(o.id)}">
+      const canShip = o.status === "PAID" || o.status === "PREPARING" || o.status === "SHIPPING";
+      const carrierOpts = carriers.map((c) =>
+        `<option value="${esc(c.code)}" ${c.code === o.carrier ? "selected" : ""}>${esc(c.name)}</option>`
+      ).join("");
+      const statusSelect = (canShip || o.status === "DELIVERED")
+        ? `<label>상태
+            <select data-admin-status="${esc(o.id)}">
+              ${["PAID", "PREPARING", "SHIPPING", "DELIVERED"].map((s) =>
+                `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
+              ).join("")}
+            </select>
+          </label>`
+        : "";
+      const shipForm = canShip
+        ? `<div class="order-admin ship-fields" data-ship="${esc(o.id)}" ${o.status === "SHIPPING" ? "" : "hidden"}>
             <select data-carrier>${carrierOpts}</select>
-            <input data-tracking placeholder="운송장 번호" value="${esc(o.trackingNumber || "")}" />
-            <button class="btn btn-teal" type="button" data-ship-save="${esc(o.id)}">발송 처리</button>
+            <input data-tracking placeholder="송장번호" value="${esc(o.trackingNumber || "")}" />
+            <button class="btn btn-teal" type="button" data-ship-save="${esc(o.id)}">발송 저장</button>
           </div>`
         : "";
       const cancelBtns = o.status === "CANCEL_REQUESTED"
@@ -1899,7 +2425,9 @@ async function loadAdminOrders() {
         <p>${items || "상품 없음"}</p>
         <p><b>${won(o.total || 0)}</b>${o.shippingFee ? ` · 배송비 ${won(o.shippingFee)}` : " · 배송비 무료"} ${o.paymentMethod ? " · " + esc(o.paymentMethod) : ""}</p>
         ${o.memo ? `<p class="muted">메모: ${esc(o.memo)}</p>` : ""}
-        ${o.cancelReason ? `<p class="muted">${o.cancelledBy === "ADMIN" ? "관리자 취소" : "거절 사유"}: ${esc(o.cancelReason)}</p>` : ""}
+        ${cancelReasonLine(o)}
+        ${o.status !== "CANCELLED" && o.status !== "CANCELED" && o.cancelReason ? `<p class="muted">거절 사유: ${esc(o.cancelReason)}</p>` : ""}
+        <div class="order-admin">${statusSelect}</div>
         ${shipForm}
         ${cancelBtns}
         ${directCancel}
@@ -1948,6 +2476,26 @@ async function loadAdminOrders() {
       }
     };
   }
+  box.onchange = (e) => {
+    const sel = e.target.closest("[data-admin-status]");
+    if (!sel) return;
+    const card = sel.closest("article");
+    const shipBox = card && card.querySelector("[data-ship]");
+    if (sel.value === "SHIPPING") {
+      if (shipBox) shipBox.hidden = false;
+      return;
+    }
+    if (shipBox) shipBox.hidden = true;
+    if (sel.value === "PREPARING" || sel.value === "DELIVERED" || sel.value === "PAID") {
+      api("/api/orders/" + encodeURIComponent(sel.getAttribute("data-admin-status")), {
+        method: "PATCH",
+        body: JSON.stringify({ status: sel.value })
+      }).then(() => {
+        toast("상태를 바꿨습니다.");
+        return render();
+      }).catch((err) => toast(err.message));
+    }
+  };
   box.onclick = async (e) => {
     const ship = e.target.closest("[data-ship-save]");
     const approve = e.target.closest("[data-cancel-approve]");
@@ -1971,7 +2519,7 @@ async function loadAdminOrders() {
           method: "POST",
           body: JSON.stringify({ carrier, tracking_number: tracking })
         });
-        toast("발송 처리했습니다.");
+        toast("발송 저장했습니다.");
         await render();
       }
       if (approve) {

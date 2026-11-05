@@ -1113,8 +1113,9 @@ function productsByFilter(opts) {
     if (opts.mode && opts.mode !== "all" && p.mode !== opts.mode && p.mode !== "both") return false;
     if (opts.featured && !(p.badges || []).includes("hot")) return false;
     if (opts.q) {
-      const hay = (p.name + p.desc + categoryName(p.category) + groupName(g)).toLowerCase();
-      if (hay.indexOf(opts.q.toLowerCase()) < 0) return false;
+      const needle = String(opts.q).replace(/\s+/g, "").toLowerCase();
+      const hay = (p.name + p.desc + categoryName(p.category) + groupName(g)).replace(/\s+/g, "").toLowerCase();
+      if (hay.indexOf(needle) < 0) return false;
     }
     return true;
   });
