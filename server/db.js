@@ -477,16 +477,42 @@ async function findDjangoAccount(login) {
   const phone = /^01[016789]\d{7,8}$/.test(digits) ? digits : "";
   try {
     const result = await pool.query(
-      "SELECT u.username, u.email, u.password, u.first_name, u.is_active, u.is_staff, u.is_superuser, " +
-      "p.name AS profile_name, p.phone AS profile_phone, p.role AS profile_role, p.status AS profile_status " +
-      "FROM auth_user u LEFT JOIN accounts_profile p ON p.user_id = u.id " +
-      "WHERE lower(u.username) = lower($1) " +
-      "OR (COALESCE(u.email, '') <> '' AND lower(u.email) = lower($1)) " +
-      "OR ($2 <> '' AND regexp_replace(COALESCE(p.phone, ''), '[^0-9]', '', 'g') = $2) " +
-      "LIMIT 1",
-      [loginId, phone]
+      "SELECT username, email, password, first_name, is_active, is_staff, is_superuser, id " +
+      "FROM auth_user WHERE lower(username) = lower($1) " +
+      "OR (COALESCE(email, '') <> '' AND lower(email) = lower($1)) LIMIT 1",
+      [loginId]
     );
-    return mapHerium(result.rows[0]);
+    let row = result.rows[0] || null;
+    if (!row && phone) {
+      try {
+        const byPhone = await pool.query(
+          "SELECT u.username, u.email, u.password, u.first_name, u.is_active, u.is_staff, u.is_superuser, u.id " +
+          "FROM auth_user u JOIN accounts_profile p ON p.user_id = u.id " +
+          "WHERE regexp_replace(COALESCE(p.phone, ''), '[^0-9]', '', 'g') = $1 LIMIT 1",
+          [phone]
+        );
+        row = byPhone.rows[0] || null;
+      } catch (_e) {}
+    }
+    if (!row) return null;
+    let profile = {};
+    try {
+      const extra = await pool.query(
+        "SELECT name AS profile_name, phone AS profile_phone, role AS profile_role, status AS profile_status " +
+        "FROM accounts_profile WHERE user_id = $1 LIMIT 1",
+        [row.id]
+      );
+      profile = extra.rows[0] || {};
+    } catch (_e) {
+      try {
+        const extra = await pool.query(
+          "SELECT name AS profile_name, phone AS profile_phone FROM accounts_profile WHERE user_id = $1 LIMIT 1",
+          [row.id]
+        );
+        profile = extra.rows[0] || {};
+      } catch (_err) {}
+    }
+    return mapHerium(Object.assign({}, row, profile));
   } catch (err) {
     console.error("auth_user lookup failed", err && err.message);
     return null;

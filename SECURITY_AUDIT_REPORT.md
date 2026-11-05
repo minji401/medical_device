@@ -5,7 +5,7 @@
 범위: 요구사항 1–27 (쇼핑몰 결제 무결성 포함)  
 배포: 이 점검은 **로컬 코드에만 반영**되어 있습니다. 원격 반영은 `푸시해줘`를 받은 뒤에 합니다.
 
-운영 환경변수 필수 값: `NODE_ENV=production`, `DEBUG=False`, `SESSION_SECRET`, `DATABASE_URL`, `TOSS_SECRET_KEY`, `TOSS_CLIENT_KEY`, `ADMIN_URL_PATH`. 웹훅 서명 검증을 쓰려면 `TOSS_WEBHOOK_SECRET`도 넣습니다.
+운영 환경변수 필수 값: `NODE_ENV=production`, `DEBUG=False`, `SESSION_SECRET`, `DATABASE_URL`, `TOSS_SECRET_KEY`, `TOSS_CLIENT_KEY`, `ADMIN_URL_PATH`. `TOSS_WEBHOOK_SECRET`은 없어도 됩니다. 테스트 모드에서 키가 안 보이면 비워 두면 웹훅은 토스 결제 재조회로만 검증합니다.
 
 ---
 
@@ -158,6 +158,6 @@
 - `SESSION_SECRET` (긴 난수)
 - `ADMIN_URL_PATH` (추측 어려운 경로, robots에 Disallow 됨)
 - `TOSS_SECRET_KEY` / `TOSS_CLIENT_KEY` (키 종류: `ck`/`gck`와 SDK 일치)
-- (권장) `TOSS_WEBHOOK_SECRET`
+- `TOSS_WEBHOOK_SECRET` — 없어도 됨 (테스트 단계에서 비공개 값이 안 나오면 설정하지 않음)
 - `DATABASE_URL` Neon
 - `ALLOWED_HOSTS=hyundaimedi.com,www.hyundaimedi.com,.onrender.com`

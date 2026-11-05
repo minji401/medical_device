@@ -450,8 +450,12 @@ function attach(app, deps) {
   app.post("/api/payments/webhook", async (req, res) => {
     try {
       if (!tossKeys().secret) return res.status(200).json({ ok: true });
+      // 테스트·개발자센터에서 웹훅 시크릿이 안 보여도 동작. 값이 있을 때만 Authorization 검사.
       const expectedAuth = String(process.env.TOSS_WEBHOOK_SECRET || "").trim();
-      if (expectedAuth) {
+      const webhookSecretReady = expectedAuth.length >= 8
+        && expectedAuth !== "undefined"
+        && expectedAuth !== "null";
+      if (webhookSecretReady) {
         const given = String(req.get("authorization") || "");
         const ok = given === expectedAuth || given === "Basic " + Buffer.from(expectedAuth + ":").toString("base64");
         if (!ok) {

@@ -1635,14 +1635,27 @@ function initAdmin() {
   mountShell("account");
   const gate = document.querySelector("#admin-gate");
   const dash = document.querySelector("#admin-dashboard");
+  const setAdminHero = (mode) => {
+    const title = document.querySelector("#admin-hero-title");
+    const lead = document.querySelector("#admin-hero-lead");
+    if (mode === "login") {
+      if (title) title.textContent = "관리자 로그인";
+      if (lead) lead.textContent = "헤리움 관리자 계정으로 로그인해 주세요.";
+    } else {
+      if (title) title.textContent = "주문·상품·회사 정보 관리";
+      if (lead) lead.textContent = "주문 배송·취소와 재고 10개 이하 상품을 관리합니다.";
+    }
+  };
   const showGate = (msg) => {
     if (dash) dash.hidden = true;
     if (gate) gate.hidden = false;
+    setAdminHero("login");
     if (msg) showFormError("#admin-login-error", msg);
   };
   const showDash = () => {
     if (gate) gate.hidden = true;
     if (dash) dash.hidden = false;
+    setAdminHero("dash");
   };
   const bindAdminLogin = () => {
     const form = document.querySelector("#admin-login-form");
@@ -1675,9 +1688,11 @@ function initAdmin() {
       const extra = document.querySelector("#admin-login-page");
       if (extra) extra.href = loginHref;
       bindAdminLogin();
-      showGate(user
-        ? "관리자 권한이 없는 계정입니다. 헤리움 관리자 계정으로 다시 로그인해 주세요."
-        : "관리자 로그인이 필요합니다.");
+      if (user) {
+        showGate("관리자 권한이 없는 계정입니다. 헤리움 관리자 계정으로 다시 로그인해 주세요.");
+      } else {
+        showGate("");
+      }
       return;
     }
     showDash();

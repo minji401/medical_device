@@ -194,25 +194,17 @@ function hashPassword(password) {
   return passwords.hashPassword(password);
 }
 
-function verifyDjangoPassword(password, encoded) {
-  const parts = String(encoded || "").split("$");
-  if (parts.length !== 4 || parts[0] !== "pbkdf2_sha256") return false;
-  const iterations = Number(parts[1]);
-  const salt = parts[2];
-  let expected;
-  try {
-    expected = Buffer.from(parts[3], "base64");
-  } catch (_e) {
-    return false;
-  }
-  if (!iterations || !salt || !expected.length) return false;
-  const actual = crypto.pbkdf2Sync(String(password), salt, iterations, expected.length, "sha256");
-  if (actual.length !== expected.length) return false;
-  return crypto.timingSafeEqual(actual, expected);
-}
-
 function verifyPassword(password, stored) {
   return passwords.verifyPassword(password, stored);
+}
+
+function staffPlaceholderPhone(username) {
+  const hex = crypto.createHash("sha256").update("hm-staff:" + String(username || "admin")).digest("hex");
+  let digits = "";
+  for (let i = 0; i < hex.length && digits.length < 8; i += 1) {
+    digits += String(parseInt(hex.charAt(i), 16) % 10);
+  }
+  return "010" + digits.padEnd(8, "0");
 }
 
 function issueAccessToken(user) {
@@ -603,7 +595,7 @@ async function linkHeriumLogin(login, password, sharedUser) {
   const herium = await db.findHeriumAccount(login);
   if (!herium || !herium.isActive) return null;
   if (herium.status === "suspended" || herium.status === "withdrawn") return null;
-  if (!verifyDjangoPassword(password, herium.password)) return null;
+  if (!(await passwords.verifyDjangoPassword(password, herium.password))) return null;
   const staff = db.heriumIsAdmin(herium);
   const passwordHash = hashPassword(password);
   const samePerson = (user) => {
@@ -617,6 +609,7 @@ async function linkHeriumLogin(login, password, sharedUser) {
   let target = sharedUser && samePerson(sharedUser) ? sharedUser : null;
   if (!target && herium.phone) target = await db.findUserByPhone(herium.phone);
   if (!target && herium.username) target = await db.findUserByUsername(herium.username);
+  if (!target && herium.email) target = await db.findUserByEmail(herium.email);
   if (target) {
     await db.updatePassword(target.id, passwordHash);
     await db.setUsername(target.id, herium.username);
@@ -624,12 +617,14 @@ async function linkHeriumLogin(login, password, sharedUser) {
     if (staff) await db.setUserRole(target.id, "admin");
     return ensureAdminRole(await db.findUserById(target.id), login);
   }
-  if (!validPhone(herium.phone)) return null;
+  const phone = validPhone(herium.phone) ? herium.phone : (staff ? staffPlaceholderPhone(herium.username) : "");
+  if (!validPhone(phone)) return null;
   const created = {
     id: "u_" + crypto.randomUUID(),
-    name: "",
+    name: herium.name || herium.username || "",
     username: herium.username,
-    phone: herium.phone,
+    email: herium.email || "",
+    phone,
     passwordHash,
     role: staff ? "admin" : "user",
     heriumLinked: true,
@@ -642,7 +637,9 @@ async function linkHeriumLogin(login, password, sharedUser) {
     await db.createUser(created);
     return ensureAdminRole(created, login);
   } catch (_err) {
-    const again = await db.findUserByPhone(herium.phone);
+    const again = (herium.phone && await db.findUserByPhone(herium.phone))
+      || await db.findUserByPhone(phone)
+      || await db.findUserByUsername(herium.username);
     if (!again) return null;
     await db.updatePassword(again.id, passwordHash);
     await db.setUsername(again.id, herium.username);
@@ -657,17 +654,14 @@ app.post("/api/login", guard.loginLimiter, async (req, res) => {
   const login = String(req.body.login || req.body.username || req.body.phone || "").trim();
   const password = String(req.body.password || "");
   const user = await db.findUserByLogin(login);
-  if (user) {
-    const locked = db.lockMessage(user);
-    if (locked) return res.status(423).json({ error: locked });
-    if (user.loginLockedUntil) {
-      await db.clearLoginFailure(user.id);
-      user.loginFailures = 0;
-      user.loginLockedUntil = "";
-    }
+  if (user && user.loginLockedUntil && !db.lockMessage(user)) {
+    await db.clearLoginFailure(user.id);
+    user.loginFailures = 0;
+    user.loginLockedUntil = "";
   }
+  const locked = user ? db.lockMessage(user) : "";
   if (user && user.withdrawnAt) return res.status(403).json({ error: "탈퇴 처리된 계정입니다." });
-  if (user && verifyPassword(password, user.passwordHash)) {
+  if (user && !locked && await passwords.verifyAnyPassword(password, user.passwordHash)) {
     if (passwords.needsRehash(user.passwordHash)) await db.updatePassword(user.id, hashPassword(password));
     await db.clearLoginFailure(user.id);
     await ensureAdminRole(user, login);
@@ -676,6 +670,7 @@ app.post("/api/login", guard.loginLimiter, async (req, res) => {
   }
   const linked = await linkHeriumLogin(login, password, user);
   if (!linked) {
+    if (locked) return res.status(423).json({ error: locked });
     if (user) {
       const state = await db.noteLoginFailure(user.id, user.loginFailures);
       if (state.locked) return res.status(423).json({ error: db.lockMessage({ loginLockedUntil: state.until }) });
