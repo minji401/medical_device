@@ -3,7 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --require ./tests/env.js --test ./tests/auth.test.js ./tests/admin.test.js ./tests/cart.test.js ./tests/order.test.js ./tests/payment.test.js ./tests/pricing.test.js ./tests/search.test.js",
+    "test:auth": "node --require ./tests/env.js --test tests/auth.test.js",
+    "test:order": "node --require ./tests/env.js --test tests/order.test.js tests/cart.test.js",
+    "test:payment": "node --require ./tests/env.js --test tests/payment.test.js tests/pricing.test.js",
+    "test:admin": "node --require ./tests/env.js --test tests/admin.test.js"
   },
   "engines": {
     "node": ">=18"

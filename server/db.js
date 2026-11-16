@@ -248,8 +248,32 @@ async function migrateJson() {
   }
 }
 
+function openTestSqlite() {
+  const os = require("os");
+  const liveUrl = String(process.env.DATABASE_URL || "");
+  if (/neon\.tech/i.test(liveUrl)) {
+    throw new Error("테스트 모드에서는 Neon DATABASE_URL을 사용할 수 없습니다.");
+  }
+  delete process.env.DATABASE_URL;
+  const file = process.env.TEST_SQLITE_PATH || path.join(os.tmpdir(), "hyundai-test-" + process.pid + ".sqlite");
+  if (sqlite) {
+    try { sqlite.close(); } catch (_e) {}
+    sqlite = null;
+  }
+  if (pool) {
+    pool = null;
+  }
+  const Database = require("better-sqlite3");
+  sqlite = new Database(file);
+  driver = "sqlite";
+}
+
 async function init() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (process.env.NODE_ENV === "test") {
+    openTestSqlite();
+    await runScript(SCHEMA);
+  } else {
   const url = process.env.DATABASE_URL;
   if (url) {
     const { Pool } = require("pg");
@@ -269,9 +293,10 @@ async function init() {
   } else {
     throw new Error("DATABASE_URL이 필요합니다. SQLite는 쓰지 않고 Neon Postgres만 사용합니다.");
   }
+  }
   await ensureColumns();
   await require("./shared_schema").apply(exec, driver);
-  await migrateJson();
+  if (process.env.NODE_ENV !== "test") await migrateJson();
   await exec(
     `CREATE TABLE IF NOT EXISTS password_resets (
       id TEXT PRIMARY KEY,

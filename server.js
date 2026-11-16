@@ -5,6 +5,7 @@ const vm = require("vm");
 const express = require("express");
 
 (function loadDotEnv() {
+  if (process.env.NODE_ENV === "test") return;
   const envPath = path.join(__dirname, ".env");
   if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
@@ -44,7 +45,7 @@ const SECRET = process.env.SESSION_SECRET || (DEBUG ? "hyundai-medical-dev-secre
 const JWT_SECRET = process.env.JWT_SECRET || SECRET;
 const COOKIE = "hm_session";
 const ADMIN_URL_PATH = String(process.env.ADMIN_URL_PATH || "hyundai-control-99").replace(/^\/+|\/+$/g, "") || "hyundai-control-99";
-if (!DEBUG && !SECRET) {
+if (process.env.NODE_ENV !== "test" && !DEBUG && !SECRET) {
   console.error("SESSION_SECRET이 없습니다. 배포 환경변수에 넣어 주세요.");
   process.exit(1);
 }
@@ -1229,7 +1230,11 @@ process.on("unhandledRejection", (reason) => {
   console.error("unhandledRejection", reason && reason.message ? reason.message : reason);
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("현대 의료기 서버 0.0.0.0:" + PORT);
-});
-startDatabase();
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log("현대 의료기 서버 0.0.0.0:" + PORT);
+  });
+  startDatabase();
+}
+
+module.exports = app;
