@@ -1639,3 +1639,76 @@ button:focus-visible, a.btn:focus-visible, input:focus-visible, select:focus-vis
   font-weight: 700;
   cursor: pointer;
 }
+
+.orders-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.orders-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.order-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.order-filter-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.order-filter-btn.is-active {
+  background: var(--teal-dark);
+  border-color: var(--teal-dark);
+  color: #fff;
+}
+.order-filter-count {
+  min-width: 1.4em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.2);
+  font-size: 12px;
+}
+.order-filter-btn:not(.is-active) .order-filter-count {
+  background: #f4efe4;
+  color: #8f6c38;
+}
+.orders-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.orders-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6b645c;
+}
+.orders-controls select,
+.orders-controls input {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: #fff;
+}
+.orders-count { margin: 0 0 12px; }
+#order-more-wrap { margin-top: 14px; }

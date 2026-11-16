@@ -1669,7 +1669,17 @@ const SHIP_CARRIERS = [
   { code: "kr.logen", name: "로젠택배" },
   { code: "kr.lotte", name: "롯데택배" }
 ];
-const ORDER_PAGE_SIZE = 8;
+const ORDER_PREVIEW_COUNT = 3;
+const ORDER_STATUS_TABS = [
+  { key: "ALL", label: "전체", match: null },
+  { key: "PAID", label: "결제완료", match: ["PAID"] },
+  { key: "PREPARING", label: "배송준비", match: ["PREPARING"] },
+  { key: "SHIPPING", label: "배송중", match: ["SHIPPING", "SHIPPED"] },
+  { key: "DELIVERED", label: "배송완료", match: ["DELIVERED"] },
+  { key: "CANCEL_REQUESTED", label: "취소요청", match: ["CANCEL_REQUESTED"] },
+  { key: "CANCELLED", label: "취소완료", match: ["CANCELLED", "CANCELED"] }
+];
+const ADMIN_STATUS_OPTIONS = ["PAID", "PREPARING", "SHIPPING", "DELIVERED", "CANCELLED"];
 
 function cancelReasonLine(order) {
   const status = String(order.status || "");
@@ -1714,7 +1724,71 @@ function bindMypageTabs() {
   else show("orders");
 }
 
-function mypageOrderCard(o, user, carriers) {
+function orderCreatedMs(order) {
+  const raw = order && (order.createdAt || order.paidAt || "");
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function orderInRange(order, days) {
+  const span = Number(days) || 365;
+  const t = orderCreatedMs(order);
+  if (!t) return true;
+  return Date.now() - t <= span * 24 * 60 * 60 * 1000;
+}
+
+function orderMatchesQuery(order, q) {
+  const needle = String(q || "").trim().toLowerCase();
+  if (!needle) return true;
+  const bits = [
+    order.number,
+    order.name,
+    order.recipientName,
+    order.orderName,
+    (order.items || []).map((i) => i.name).join(" ")
+  ];
+  return bits.join(" ").toLowerCase().indexOf(needle) >= 0;
+}
+
+function orderStatusGroup(status) {
+  const s = String(status || "");
+  if (s === "SHIPPED") return "SHIPPING";
+  if (s === "CANCELED") return "CANCELLED";
+  return s;
+}
+
+function carrierLabel(code, carriers) {
+  const list = carriers && carriers.length ? carriers : SHIP_CARRIERS;
+  const found = list.find((c) => c.code === code);
+  return (found && found.name) || code || "";
+}
+
+function goodsLine(order) {
+  return (order.items || []).map((i) => (i.name || "") + " × " + (i.qty || 1)).join(", ") || (order.title || "");
+}
+
+function itemAmount(order) {
+  const total = Number(order.total) || 0;
+  const ship = Number(order.shippingFee) || 0;
+  return Math.max(0, total - ship);
+}
+
+function filterOrders(orders, opts) {
+  const status = opts.status || "ALL";
+  const days = opts.days || 365;
+  const q = opts.q || "";
+  const sort = opts.sort === "asc" ? "asc" : "desc";
+  const tab = ORDER_STATUS_TABS.find((t) => t.key === status);
+  let rows = (orders || []).filter((o) => orderInRange(o, days)).filter((o) => orderMatchesQuery(o, q));
+  if (tab && tab.match) {
+    rows = rows.filter((o) => tab.match.indexOf(orderStatusGroup(o.status)) >= 0 || tab.match.indexOf(o.status) >= 0);
+  }
+  rows.sort((a, b) => (orderCreatedMs(a) - orderCreatedMs(b)) * (sort === "asc" ? 1 : -1));
+  return rows;
+}
+
+function mypageOrderCard(o, user, carriers, options) {
+  const manage = options && options.manage;
   const first = (o.items || [])[0];
   const extra = Math.max(0, (o.items || []).length - 1);
   const title = first
@@ -1730,16 +1804,22 @@ function mypageOrderCard(o, user, carriers) {
     ? `<a class="btn btn-outline" href="${esc(o.receiptUrl)}" target="_blank" rel="noopener">영수증 보기</a>`
     : "";
   const canShip = o.status === "PAID" || o.status === "PREPARING" || o.status === "SHIPPING";
-  const admin = isAdminUser(user)
+  const admin = (manage && isAdminUser(user))
     ? `<div class="order-admin">
         <label>상태
           <select data-order-status="${esc(o.id)}">
-            ${["READY", "PAID", "PREPARING", "SHIPPING", "DELIVERED", "CANCEL_REQUESTED", "CANCELLED"].map((s) =>
-              `<option value="${s}" ${s === o.status ? "selected" : ""}>${statusLabel(s)}</option>`
+            ${ADMIN_STATUS_OPTIONS.map((s) =>
+              `<option value="${s}" ${s === orderStatusGroup(o.status) ? "selected" : ""}>${statusLabel(s)}</option>`
             ).join("")}
           </select>
         </label>
-        ${canShip ? shipFieldsHtml(o, carriers, o.status === "SHIPPING") : ""}
+        ${canShip ? shipFieldsHtml(o, carriers, o.status === "SHIPPING" || o.status === "SHIPPED") : ""}
+        ${o.status === "CANCEL_REQUESTED" ? `<div class="order-actions">
+          <button class="btn btn-teal" type="button" data-cancel-approve="${esc(o.id)}">취소 승인</button>
+          <input data-reject-reason="${esc(o.id)}" placeholder="거절 사유" />
+          <button class="btn btn-outline" type="button" data-cancel-reject="${esc(o.id)}">취소 거절</button>
+        </div>` : ""}
+        ${(o.status === "PAID" || o.status === "PREPARING") ? `<button class="btn btn-danger" type="button" data-cancel-direct="${esc(o.id)}">관리자 직권 취소</button>` : ""}
       </div>`
     : "";
   return `<article class="panel order-card" id="order-${esc(o.id)}">
@@ -1768,6 +1848,353 @@ function mypageOrderCard(o, user, carriers) {
     ${o.cancel && o.cancel.message ? `<p class="muted">${esc(o.cancel.message)}</p>` : ""}
     ${admin}
   </article>`;
+}
+
+function bindOrderListActions(box, reload) {
+  if (!box) return;
+  box.onchange = async (e) => {
+    const sel = e.target.closest("[data-order-status]");
+    if (!sel) return;
+    const card = sel.closest("article");
+    const ship = card && card.querySelector("[data-ship]");
+    if (sel.value === "SHIPPING") {
+      if (ship) ship.hidden = false;
+      if (!(card && card.querySelector("[data-tracking]") && card.querySelector("[data-tracking]").value.trim())) {
+        toast("배송중으로 바꾸려면 택배사와 송장번호를 입력한 뒤 발송 저장을 눌러 주세요.");
+        return;
+      }
+    }
+    if (ship && sel.value !== "SHIPPING") ship.hidden = true;
+    if (sel.value === "CANCELLED" && !confirm("이 주문을 취소완료로 바꿀까요? 결제된 경우 승인이 취소됩니다.")) {
+      if (typeof reload === "function") reload();
+      return;
+    }
+    try {
+      await api("/api/orders/" + sel.dataset.orderStatus, {
+        method: "PATCH",
+        body: JSON.stringify({ status: sel.value })
+      });
+      toast("상태를 바꿨습니다.");
+      if (typeof reload === "function") await reload();
+    } catch (err) {
+      toast(err.message);
+      if (typeof reload === "function") await reload();
+    }
+  };
+  box.onclick = async (e) => {
+    const shipBtn = e.target.closest("[data-ship-save]");
+    if (shipBtn) {
+      const wrap = shipBtn.closest("[data-ship]");
+      const carrier = wrap.querySelector("[data-carrier]").value;
+      const tracking = wrap.querySelector("[data-tracking]").value;
+      try {
+        await api("/api/admin/orders/" + encodeURIComponent(shipBtn.getAttribute("data-ship-save")) + "/ship", {
+          method: "POST",
+          body: JSON.stringify({ carrier, tracking_number: tracking })
+        });
+        toast("발송 저장했습니다.");
+        if (typeof reload === "function") await reload();
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    const direct = e.target.closest("[data-cancel-direct]");
+    if (direct) {
+      const form = document.querySelector("#admin-cancel-form");
+      const modal = document.querySelector("#admin-cancel-modal");
+      if (form) {
+        form.reset();
+        form.order_id.value = direct.getAttribute("data-cancel-direct");
+      }
+      showFormError("#admin-cancel-error", "");
+      if (modal) modal.hidden = false;
+      return;
+    }
+    const approve = e.target.closest("[data-cancel-approve]");
+    if (approve) {
+      if (!confirm("토스 결제를 취소하고 재고를 복구할까요?")) return;
+      try {
+        await api("/api/admin/orders/" + encodeURIComponent(approve.getAttribute("data-cancel-approve")) + "/cancel/approve", { method: "POST", body: "{}" });
+        toast("취소를 승인했습니다.");
+        if (typeof reload === "function") await reload();
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    const reject = e.target.closest("[data-cancel-reject]");
+    if (reject) {
+      const id = reject.getAttribute("data-cancel-reject");
+      const card = reject.closest("article");
+      const reasonEl = card && card.querySelector("[data-reject-reason]");
+      const reason = (reasonEl && reasonEl.value) || "";
+      if (!reason.trim()) {
+        toast("거절 사유를 입력해 주세요.");
+        return;
+      }
+      try {
+        await api("/api/admin/orders/" + encodeURIComponent(id) + "/cancel/reject", {
+          method: "POST",
+          body: JSON.stringify({ reason, restore_status: "PREPARING" })
+        });
+        toast("취소 요청을 거절했습니다.");
+        if (typeof reload === "function") await reload();
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    const cancelBtn = e.target.closest("[data-cancel-order]");
+    const requestBtn = e.target.closest("[data-cancel-request]");
+    const btn = cancelBtn || requestBtn;
+    if (!btn) return;
+    const id = btn.getAttribute("data-cancel-order") || btn.getAttribute("data-cancel-request");
+    const ask = cancelBtn ? "이 주문을 취소할까요? 결제된 경우 승인이 취소됩니다." : "배송이 시작된 주문입니다. 취소 요청만 접수됩니다. 진행할까요?";
+    if (!confirm(ask)) return;
+    try {
+      const result = await api("/api/orders/" + encodeURIComponent(id) + "/cancel", {
+        method: "POST",
+        body: JSON.stringify({ request: Boolean(requestBtn) })
+      });
+      toast(result.message || "처리되었습니다.");
+      if (typeof reload === "function") await reload();
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+}
+
+function bindAdminCancelModal(reload) {
+  const modal = document.querySelector("#admin-cancel-modal");
+  const form = document.querySelector("#admin-cancel-form");
+  if (!modal || !form) return;
+  modal.querySelectorAll("[data-cancel-modal-close]").forEach((el) => {
+    el.onclick = () => { modal.hidden = true; };
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    showFormError("#admin-cancel-error", "");
+    const id = form.order_id.value;
+    try {
+      await api("/api/admin/orders/" + encodeURIComponent(id) + "/cancel-direct", {
+        method: "POST",
+        body: JSON.stringify({
+          reason: form.reason.value,
+          detailReason: form.detailReason.value
+        })
+      });
+      modal.hidden = true;
+      toast("관리자 취소 및 환불 처리가 완료되었습니다.");
+      if (typeof reload === "function") await reload();
+    } catch (err) {
+      showFormError("#admin-cancel-error", err.message);
+    }
+  };
+}
+
+function crc32Table() {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    table[i] = c >>> 0;
+  }
+  return table;
+}
+const CRC32_TABLE = crc32Table();
+
+function crc32Bytes(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function concatBytes(parts) {
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  parts.forEach((p) => { out.set(p, off); off += p.length; });
+  return out;
+}
+
+function u16le(n) { return new Uint8Array([n & 255, (n >>> 8) & 255]); }
+function u32le(n) { return new Uint8Array([n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]); }
+
+function zipStore(files) {
+  const encoder = new TextEncoder();
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  files.forEach((file) => {
+    const name = encoder.encode(file.name);
+    const data = file.data;
+    const crc = crc32Bytes(data);
+    const local = concatBytes([
+      new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+      u32le(crc), u32le(data.length), u32le(data.length),
+      u16le(name.length), u16le(0),
+      name, data
+    ]);
+    const central = concatBytes([
+      new Uint8Array([0x50, 0x4b, 0x01, 0x02, 0x14, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+      u32le(crc), u32le(data.length), u32le(data.length),
+      u16le(name.length), u16le(0), u16le(0), u16le(0), u16le(0),
+      u32le(0), u32le(offset),
+      name
+    ]);
+    locals.push(local);
+    centrals.push(central);
+    offset += local.length;
+  });
+  const centralDir = concatBytes(centrals);
+  const end = concatBytes([
+    new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00]),
+    u16le(files.length), u16le(files.length),
+    u32le(centralDir.length), u32le(offset),
+    u16le(0)
+  ]);
+  return concatBytes(locals.concat([centralDir, end]));
+}
+
+function xmlText(value) {
+  return String(value == null ? "" : value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function colLetter(i) {
+  let n = i + 1;
+  let s = "";
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+function buildOrdersXlsx(rows, carriers) {
+  const headers = ["주문번호", "주문일시", "주문상태", "주문자명", "연락처", "상품명 및 수량", "상품금액", "배송비", "총 결제금액", "결제수단", "택배사", "송장번호", "배송지 주소", "취소사유"];
+  const data = (rows || []).map((o) => {
+    const addr = [o.postalCode ? "[" + o.postalCode + "]" : "", o.addressBasic || o.address || "", o.addressDetail || ""].filter(Boolean).join(" ").trim();
+    const cancel = [o.cancelledBy === "ADMIN" || String(o.cancelledBy || "").toUpperCase() === "ADMIN" ? "[관리자]" : "", o.cancelReason || ""].filter(Boolean).join(" ").trim();
+    return [
+      o.number || "",
+      String(o.createdAt || "").replace("T", " ").slice(0, 19),
+      statusLabel(o.status),
+      o.name || o.recipientName || "",
+      o.phone || o.recipientPhone || "",
+      goodsLine(o),
+      itemAmount(o),
+      Number(o.shippingFee) || 0,
+      Number(o.total) || 0,
+      o.paymentMethod || "",
+      carrierLabel(o.carrier, carriers),
+      o.trackingNumber || "",
+      addr,
+      cancel
+    ];
+  });
+  const widths = headers.map((h, i) => {
+    let max = String(h).length;
+    data.forEach((row) => { max = Math.max(max, String(row[i] == null ? "" : row[i]).length); });
+    return Math.min(42, Math.max(12, max + 2));
+  });
+  function cellXml(r, c, value, header) {
+    const ref = colLetter(c) + String(r);
+    const num = typeof value === "number" && Number.isFinite(value);
+    if (header) {
+      return `<c r="${ref}" t="inlineStr" s="1"><is><t>${xmlText(value)}</t></is></c>`;
+    }
+    if (num) return `<c r="${ref}" t="n"><v>${value}</v></c>`;
+    return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlText(value)}</t></is></c>`;
+  }
+  const sheetRows = [`<row r="1">${headers.map((h, i) => cellXml(1, i, h, true)).join("")}</row>`];
+  data.forEach((row, idx) => {
+    const r = idx + 2;
+    sheetRows.push(`<row r="${r}">${row.map((v, i) => cellXml(r, i, v, false)).join("")}</row>`);
+  });
+  const cols = widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("");
+  const encoder = new TextEncoder();
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cols>${cols}</cols>
+  <sheetData>${sheetRows.join("")}</sheetData>
+</worksheet>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="주문배송내역" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2">
+    <font><sz val="11"/><name val="Malgun Gothic"/></font>
+    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Malgun Gothic"/></font>
+  </fonts>
+  <fills count="3">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF8F6C38"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="1"><border/></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+  </cellXfs>
+</styleSheet>`;
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+  const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  return zipStore([
+    { name: "[Content_Types].xml", data: encoder.encode(contentTypes) },
+    { name: "_rels/.rels", data: encoder.encode(rels) },
+    { name: "xl/workbook.xml", data: encoder.encode(workbook) },
+    { name: "xl/_rels/workbook.xml.rels", data: encoder.encode(wbRels) },
+    { name: "xl/styles.xml", data: encoder.encode(styles) },
+    { name: "xl/worksheets/sheet1.xml", data: encoder.encode(sheet) }
+  ]);
+}
+
+function downloadOrdersXlsx(rows, carriers) {
+  if (!rows.length) {
+    toast("내려받을 주문이 없습니다.");
+    return;
+  }
+  const bytes = buildOrdersXlsx(rows, carriers);
+  const stamp = new Date();
+  const y = stamp.getFullYear();
+  const m = String(stamp.getMonth() + 1).padStart(2, "0");
+  const d = String(stamp.getDate()).padStart(2, "0");
+  const name = "현대의료기_주문배송내역_" + y + m + d + ".xlsx";
+  const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 800);
 }
 
 function initAccount() {
@@ -1884,84 +2311,100 @@ function initAccount() {
     try {
       const data = await api("/api/orders");
       const box = document.querySelector("#order-list");
-      const moreWrap = document.querySelector("#order-more-wrap");
-      const moreBtn = document.querySelector("#order-more-btn");
       if (!box) return;
-      const orders = data.orders || [];
+      const orders = (data.orders || []).slice().sort((a, b) => orderCreatedMs(b) - orderCreatedMs(a));
       const carriers = data.carriers || SHIP_CARRIERS;
       if (!orders.length) {
         box.innerHTML = `<div class="empty-cta"><p class="empty">아직 주문하신 내역이 없습니다.</p><a class="btn btn-teal" href="shop.html">상품 보러가기</a></div>`;
-        if (moreWrap) moreWrap.hidden = true;
+      } else {
+        box.innerHTML = orders.slice(0, ORDER_PREVIEW_COUNT).map((o) => mypageOrderCard(o, user, carriers)).join("");
+      }
+      bindOrderListActions(box, () => location.reload());
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+}
+
+function initOrders() {
+  mountShell("account");
+  refreshAuth().then(async (user) => {
+    if (!user) {
+      location.href = "login.html#next=orders.html";
+      return;
+    }
+    const lead = document.querySelector("#orders-lead");
+    if (lead) {
+      lead.textContent = isAdminUser(user)
+        ? "관리자 계정입니다. 전체 고객 주문을 조회하고 상태·송장·취소를 처리할 수 있습니다."
+        : "본인 주문만 조회됩니다. 영수증 확인과 배송 전 취소를 이 페이지에서 진행하세요.";
+    }
+    const state = { orders: [], carriers: SHIP_CARRIERS, status: "ALL", days: 365, sort: "desc", q: "" };
+    const box = document.querySelector("#order-manage-list");
+    const filters = document.querySelector("#order-status-filters");
+    const rangeEl = document.querySelector("#order-range");
+    const sortEl = document.querySelector("#order-sort");
+    const searchEl = document.querySelector("#order-search");
+    const countEl = document.querySelector("#orders-count");
+    const xlsxBtn = document.querySelector("#orders-xlsx-btn");
+
+    function currentRows() {
+      return filterOrders(state.orders, state);
+    }
+
+    function paintFilters(periodRows) {
+      if (!filters) return;
+      filters.innerHTML = ORDER_STATUS_TABS.map((tab) => {
+        const n = tab.match
+          ? periodRows.filter((o) => tab.match.indexOf(orderStatusGroup(o.status)) >= 0 || tab.match.indexOf(o.status) >= 0).length
+          : periodRows.length;
+        return `<button type="button" class="order-filter-btn${state.status === tab.key ? " is-active" : ""}" data-order-tab="${tab.key}" role="tab" aria-selected="${state.status === tab.key ? "true" : "false"}">${tab.label}<span class="order-filter-count">${n}</span></button>`;
+      }).join("");
+    }
+
+    function paint() {
+      const periodRows = (state.orders || []).filter((o) => orderInRange(o, state.days)).filter((o) => orderMatchesQuery(o, state.q));
+      paintFilters(periodRows);
+      const rows = currentRows();
+      if (countEl) countEl.textContent = "표시 중 " + rows.length + "건 · 기간 내 " + periodRows.length + "건 (1년 초과 건은 기본 목록에서만 숨깁니다)";
+      if (!box) return;
+      if (!rows.length) {
+        box.innerHTML = `<div class="empty-cta"><p class="empty">조건에 맞는 주문이 없습니다.</p><a class="btn btn-teal" href="shop.html">상품 보러가기</a></div>`;
         return;
       }
-      let shown = ORDER_PAGE_SIZE;
-      function paintOrders() {
-        box.innerHTML = orders.slice(0, shown).map((o) => mypageOrderCard(o, user, carriers)).join("");
-        if (moreWrap) moreWrap.hidden = shown >= orders.length;
-      }
-      paintOrders();
-      if (moreBtn) {
-        moreBtn.onclick = () => {
-          shown += ORDER_PAGE_SIZE;
-          paintOrders();
-        };
-      }
-      box.onchange = async (e) => {
-        const sel = e.target.closest("[data-order-status]");
-        if (!sel) return;
-        const card = sel.closest("article");
-        const ship = card && card.querySelector("[data-ship]");
-        if (sel.value === "SHIPPING") {
-          if (ship) ship.hidden = false;
-          return;
-        }
-        if (ship) ship.hidden = true;
-        try {
-          await api("/api/orders/" + sel.dataset.orderStatus, {
-            method: "PATCH",
-            body: JSON.stringify({ status: sel.value })
-          });
-          toast("상태를 바꿨습니다.");
-        } catch (err) {
-          toast(err.message);
-        }
-      };
-      box.onclick = async (e) => {
-        const shipBtn = e.target.closest("[data-ship-save]");
-        if (shipBtn) {
-          const wrap = shipBtn.closest("[data-ship]");
-          const carrier = wrap.querySelector("[data-carrier]").value;
-          const tracking = wrap.querySelector("[data-tracking]").value;
-          try {
-            await api("/api/admin/orders/" + encodeURIComponent(shipBtn.getAttribute("data-ship-save")) + "/ship", {
-              method: "POST",
-              body: JSON.stringify({ carrier, tracking_number: tracking })
-            });
-            toast("발송 저장했습니다.");
-            location.reload();
-          } catch (err) {
-            toast(err.message);
-          }
-          return;
-        }
-        const cancelBtn = e.target.closest("[data-cancel-order]");
-        const requestBtn = e.target.closest("[data-cancel-request]");
-        const btn = cancelBtn || requestBtn;
+      box.innerHTML = rows.map((o) => mypageOrderCard(o, user, state.carriers, { manage: true })).join("");
+    }
+
+    async function load() {
+      const data = await api("/api/orders");
+      state.orders = data.orders || [];
+      state.carriers = data.carriers && data.carriers.length ? data.carriers : SHIP_CARRIERS;
+      paint();
+    }
+
+    if (filters) {
+      filters.onclick = (e) => {
+        const btn = e.target.closest("[data-order-tab]");
         if (!btn) return;
-        const id = btn.getAttribute("data-cancel-order") || btn.getAttribute("data-cancel-request");
-        const ask = cancelBtn ? "이 주문을 취소할까요? 결제된 경우 승인이 취소됩니다." : "배송이 시작된 주문입니다. 취소 요청만 접수됩니다. 진행할까요?";
-        if (!confirm(ask)) return;
-        try {
-          const result = await api("/api/orders/" + encodeURIComponent(id) + "/cancel", {
-            method: "POST",
-            body: JSON.stringify({ request: Boolean(requestBtn) })
-          });
-          toast(result.message || "처리되었습니다.");
-          location.reload();
-        } catch (err) {
-          toast(err.message);
-        }
+        state.status = btn.getAttribute("data-order-tab");
+        paint();
       };
+    }
+    if (rangeEl) rangeEl.onchange = () => { state.days = Number(rangeEl.value) || 365; paint(); };
+    if (sortEl) sortEl.onchange = () => { state.sort = sortEl.value === "asc" ? "asc" : "desc"; paint(); };
+    if (searchEl) {
+      searchEl.oninput = () => {
+        state.q = searchEl.value;
+        paint();
+      };
+    }
+    if (xlsxBtn) {
+      xlsxBtn.onclick = () => downloadOrdersXlsx(currentRows(), state.carriers);
+    }
+    bindOrderListActions(box, load);
+    bindAdminCancelModal(load);
+    try {
+      await load();
     } catch (err) {
       toast(err.message);
     }
@@ -2208,6 +2651,7 @@ function initSitemap() {
     ["find-id.html", "아이디 찾기"],
     ["find-password.html", "비밀번호 찾기"],
     ["mypage.html", "마이페이지 · 주문조회"],
+    ["orders.html", "주문/배송 조회"],
     ["privacy.html", "개인정보처리방침"],
     ["terms.html", "이용약관"],
     ["returns.html", "교환 및 반품 안내"]
@@ -2549,4 +2993,4 @@ async function loadAdminOrders() {
   await render();
 }
 
-window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initCheckout, initPaymentSuccess, initPaymentFail, initOrderComplete, initAdmin, logout };
+window.Oncare = { initHome, initShop, initProduct, initGuide, initConsult, initAbout, initSitemap, initLogin, initSignup, initFindId, initFindPassword, initResetPassword, initAccount, initOrders, initCheckout, initPaymentSuccess, initPaymentFail, initOrderComplete, initAdmin, logout };

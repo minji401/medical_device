@@ -78,7 +78,7 @@ app.use(guard.requireFetchHeader);
 
 const pages = [
   "index", "shop", "product", "guide", "consult", "about",
-  "login", "signup", "find-id", "find-password", "reset-password", "account", "mypage", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms", "returns"
+  "login", "signup", "find-id", "find-password", "reset-password", "account", "mypage", "orders", "checkout", "payment-success", "payment-fail", "sitemap", "privacy", "terms", "returns"
 ];
 
 const staticOpts = { dotfiles: "deny", index: false, fallthrough: true };
@@ -94,6 +94,7 @@ pages.forEach((name) => {
 });
 app.get("/", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
 app.get("/mypage/", (_req, res) => res.sendFile(path.join(ROOT, "mypage.html")));
+app.get("/orders/", (_req, res) => res.sendFile(path.join(ROOT, "orders.html")));
 app.get("/terms/", (_req, res) => res.sendFile(path.join(ROOT, "terms.html")));
 app.get("/privacy/", (_req, res) => res.sendFile(path.join(ROOT, "privacy.html")));
 app.get("/returns/", (_req, res) => res.sendFile(path.join(ROOT, "returns.html")));
