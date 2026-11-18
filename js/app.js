@@ -885,6 +885,20 @@ function initHome() {
   renderCards("#disability-grid", productsByFilter({ group: "disability" }).slice(0, 4));
   renderCards("#buy-grid", productsByFilter({ group: "welfare", mode: "buy" }).slice(0, 4));
   renderCards("#rent-grid", productsByFilter({ group: "welfare", mode: "rent" }).slice(0, 4));
+  const quizStart = document.querySelector("#home-quiz-start");
+  if (quizStart) {
+    quizStart.onclick = () => {
+      const intro = document.querySelector("#home-quiz-intro");
+      const note = document.querySelector("#home-quiz-note");
+      const quiz = document.querySelector("#home-quiz");
+      if (intro) intro.hidden = true;
+      if (note) note.hidden = false;
+      if (quiz) {
+        quiz.hidden = false;
+        mountCareQuiz(quiz);
+      }
+    };
+  }
   const cats = document.querySelector("#cat-grid");
   if (cats) {
     const picks = [
@@ -1335,6 +1349,33 @@ function initProduct() {
   renderCards("#related", (related.length ? related : PRODUCTS.filter((x) => productGroup(x) === g && x.id !== p.id)).slice(0, 4));
 }
 
+function mountCareQuiz(quiz) {
+  if (!quiz || quiz.dataset.ready) return;
+  quiz.dataset.ready = "1";
+  const q = [
+    ["거동이 불편해 일상생활에 다른 사람의 도움이 필요하신가요?", ["거의 항상 필요해요", "가끔 필요해요", "아직은 괜찮아요"]],
+    ["최근 6개월 내 낙상이나 욕창이 걱정되셨나요?", ["네, 걱정됩니다", "조금 있습니다", "없습니다"]],
+    ["65세 이상이거나 노인성 질환이 있으신가요?", ["65세 이상입니다", "65세 미만이지만 노인성 질환이 있습니다", "해당 없습니다"]]
+  ];
+  let step = 0, score = 0;
+  const render = () => {
+    if (step >= q.length) {
+      const likely = score >= 4;
+      quiz.innerHTML = `<div class="calc-result"><b>${likely ? "장기요양 인정 상담을 권합니다" : "먼저 생활 환경 점검부터 도와드릴게요"}</b><p>${likely ? "거동·낙상·돌봄 부담이 있다면 등급 신청과 복지용구 이용을 함께 안내드립니다." : "등급이 없어도 일반 의료기 구매와 단기 대여는 가능합니다."}</p><a class="btn btn-teal" href="consult.html">상담 신청</a></div>`;
+      return;
+    }
+    quiz.innerHTML = `<h3>${q[step][0]}</h3><div class="quiz">${q[step][1].map((a, i) => `<button data-s="${2 - i}">${a}</button>`).join("")}</div>`;
+  };
+  quiz.onclick = (e) => {
+    const b = e.target.closest("button[data-s]");
+    if (!b) return;
+    score += Number(b.dataset.s);
+    step += 1;
+    render();
+  };
+  render();
+}
+
 function initGuide() {
   mountShell("guide");
   const rate = document.querySelector("#rate");
@@ -1352,31 +1393,7 @@ function initGuide() {
     price.oninput = run;
     run();
   }
-  const quiz = document.querySelector("#quiz");
-  if (quiz) {
-    const q = [
-      ["거동이 불편해 일상생활에 다른 사람의 도움이 필요하신가요?", ["거의 항상 필요해요", "가끔 필요해요", "아직은 괜찮아요"]],
-      ["최근 6개월 내 낙상이나 욕창이 걱정되셨나요?", ["네, 걱정됩니다", "조금 있습니다", "없습니다"]],
-      ["65세 이상이거나 노인성 질환이 있으신가요?", ["65세 이상입니다", "65세 미만이지만 노인성 질환이 있습니다", "해당 없습니다"]]
-    ];
-    let step = 0, score = 0;
-    const render = () => {
-      if (step >= q.length) {
-        const likely = score >= 4;
-        quiz.innerHTML = `<div class="calc-result"><b>${likely ? "장기요양 인정 상담을 권합니다" : "먼저 생활 환경 점검부터 도와드릴게요"}</b><p>${likely ? "거동·낙상·돌봄 부담이 있다면 등급 신청과 복지용구 이용을 함께 안내드립니다." : "등급이 없어도 일반 의료기 구매와 단기 대여는 가능합니다."}</p><a class="btn btn-teal" href="consult.html">상담 신청</a></div>`;
-        return;
-      }
-      quiz.innerHTML = `<h3>${q[step][0]}</h3><div class="quiz">${q[step][1].map((a, i) => `<button data-s="${2 - i}">${a}</button>`).join("")}</div>`;
-    };
-    quiz.onclick = (e) => {
-      const b = e.target.closest("button[data-s]");
-      if (!b) return;
-      score += Number(b.dataset.s);
-      step += 1;
-      render();
-    };
-    render();
-  }
+  mountCareQuiz(document.querySelector("#quiz"));
 }
 
 function initConsult() {

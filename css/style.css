@@ -436,6 +436,17 @@ ul { list-style: none; }
   color: #8a5a00;
 }
 .benefit.wide .tag { background: rgba(255,255,255,.16); color: #fff; }
+.benefit .link-more {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+.benefit .quiz-note { color: var(--muted); margin: 0 0 12px; }
+.benefit #home-quiz h3 { font-size: 18px; }
+.benefit .quiz button { width: 100%; }
 
 .grid-4, .grid-3, .grid-2 { display: grid; gap: 16px; }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
