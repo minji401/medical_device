@@ -733,11 +733,10 @@ function renderCart() {
   const list = document.querySelector("#cart-list");
   if (!list) return;
   const items = cart();
-  const prev = Array.from(document.querySelectorAll("[data-cart-check]")).reduce((set, box) => {
-    if (box.checked) set.add(box.getAttribute("data-cart-check"));
-    return set;
-  }, new Set());
-  const hadBoxes = document.querySelectorAll("[data-cart-check]").length > 0;
+  const prev = new Map();
+  document.querySelectorAll("[data-cart-check]").forEach((box) => {
+    prev.set(box.getAttribute("data-cart-check"), box.checked);
+  });
   if (!items.length) {
     list.innerHTML = `<p class="empty">장바구니가 비어 있습니다.</p>`;
     updateCartTotals();
@@ -747,7 +746,8 @@ function renderCart() {
     const p = productById(i.id);
     if (!p) return "";
     const pay = cartLinePay(i);
-    const checked = !hadBoxes || prev.has(String(p.id));
+    const id = String(p.id);
+    const checked = !prev.size || !prev.has(id) || prev.get(id);
     return `<div class="cart-item">
       <label class="cart-check"><input type="checkbox" data-cart-check="${esc(p.id)}" ${checked ? "checked" : ""} /></label>
       ${thumbHTML(p, "cart-item-thumb")}
