@@ -889,11 +889,13 @@ function initHome() {
   const quizStart = document.querySelector("#home-quiz-start");
   if (quizStart) {
     quizStart.onclick = () => {
+      const card = document.querySelector("#home-quiz-card");
+      const title = document.querySelector("#home-quiz-title");
       const intro = document.querySelector("#home-quiz-intro");
-      const note = document.querySelector("#home-quiz-note");
       const quiz = document.querySelector("#home-quiz");
+      if (card) card.classList.add("is-open");
+      if (title) title.hidden = true;
       if (intro) intro.hidden = true;
-      if (note) note.hidden = false;
       if (quiz) {
         quiz.hidden = false;
         mountCareQuiz(quiz);
