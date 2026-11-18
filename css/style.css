@@ -699,6 +699,27 @@ ul { list-style: none; }
   padding: 14px 0;
 }
 .star-row { color: #d4a017; letter-spacing: 1px; }
+.star-slider {
+  display: flex;
+  gap: 8px;
+  width: fit-content;
+  margin: 2px 0 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.star-slider [data-star] {
+  font-size: 36px;
+  line-height: 1;
+  color: #ddd6c8;
+}
+.star-slider [data-star].is-on { color: #e2b322; }
+.star-slider:focus-visible {
+  outline: 3px solid #5a3d14;
+  outline-offset: 4px;
+  border-radius: 8px;
+}
 .qna-badge {
   display: inline-block;
   font-size: 12px;

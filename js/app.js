@@ -604,6 +604,50 @@ function starIcons(n) {
   return "★".repeat(rating) + "☆".repeat(5 - rating);
 }
 
+function bindStarSlider(slider) {
+  const input = slider.parentElement.querySelector('input[name="rating"]');
+  if (!input) return;
+  const paint = (value) => {
+    const rating = Math.max(1, Math.min(5, Math.round(Number(value) || 1)));
+    slider.querySelectorAll("[data-star]").forEach((star) => {
+      star.classList.toggle("is-on", Number(star.dataset.star) <= rating);
+    });
+    input.value = String(rating);
+    slider.setAttribute("aria-valuenow", String(rating));
+  };
+  const valueFromPoint = (clientX) => {
+    const rect = slider.getBoundingClientRect();
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    return Math.max(1, Math.min(5, Math.ceil((x / rect.width) * 5) || 1));
+  };
+  let dragging = false;
+  slider.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    paint(valueFromPoint(event.clientX));
+    if (slider.setPointerCapture) slider.setPointerCapture(event.pointerId);
+  });
+  slider.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    paint(valueFromPoint(event.clientX));
+  });
+  const stopDrag = () => { dragging = false; };
+  slider.addEventListener("pointerup", stopDrag);
+  slider.addEventListener("pointercancel", stopDrag);
+  slider.addEventListener("keydown", (event) => {
+    const current = Number(input.value) || 5;
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      paint(current + 1);
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      paint(Math.max(1, current - 1));
+    }
+  });
+  const form = slider.closest("form");
+  if (form) form.addEventListener("reset", () => setTimeout(() => paint(input.value || 5), 0));
+  paint(input.value || 5);
+}
+
 function productCard(p) {
   const g = productGroup(p);
   const images = productImages(p);
@@ -1084,13 +1128,14 @@ function initProduct() {
         <h2>구매 후기 작성</h2>
         <form class="form" id="review-form">
           <label>별점</label>
-          <select name="rating">
-            <option value="5">★★★★★ 5</option>
-            <option value="4">★★★★☆ 4</option>
-            <option value="3">★★★☆☆ 3</option>
-            <option value="2">★★☆☆☆ 2</option>
-            <option value="1">★☆☆☆☆ 1</option>
-          </select>
+          <div class="star-slider" data-star-slider role="slider" tabindex="0" aria-label="별점" aria-valuemin="1" aria-valuemax="5" aria-valuenow="5">
+            <span data-star="1">★</span>
+            <span data-star="2">★</span>
+            <span data-star="3">★</span>
+            <span data-star="4">★</span>
+            <span data-star="5">★</span>
+          </div>
+          <input type="hidden" name="rating" value="5" />
           <label>구매 옵션</label>
           <input name="option_text" placeholder="예: 대여 / 본품" />
           <label>후기 내용</label>
@@ -1230,6 +1275,8 @@ function initProduct() {
   box.querySelectorAll("[data-review-close]").forEach((el) => {
     el.onclick = () => { if (modal) modal.hidden = true; };
   });
+  const reviewStars = box.querySelector("[data-star-slider]");
+  if (reviewStars) bindStarSlider(reviewStars);
   const reviewForm = box.querySelector("#review-form");
   if (reviewForm) {
     reviewForm.onsubmit = async (e) => {
