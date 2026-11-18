@@ -608,11 +608,12 @@ function bindStarSlider(slider) {
   const input = slider.parentElement.querySelector('input[name="rating"]');
   if (!input) return;
   const paint = (value) => {
-    const rating = Math.max(1, Math.min(5, Math.round(Number(value) || 1)));
+    const raw = Number(value);
+    const rating = raw >= 1 ? Math.max(1, Math.min(5, Math.round(raw))) : 0;
     slider.querySelectorAll("[data-star]").forEach((star) => {
-      star.classList.toggle("is-on", Number(star.dataset.star) <= rating);
+      star.classList.toggle("is-on", rating > 0 && Number(star.dataset.star) <= rating);
     });
-    input.value = String(rating);
+    input.value = rating ? String(rating) : "";
     slider.setAttribute("aria-valuenow", String(rating));
   };
   const valueFromPoint = (clientX) => {
@@ -634,7 +635,7 @@ function bindStarSlider(slider) {
   slider.addEventListener("pointerup", stopDrag);
   slider.addEventListener("pointercancel", stopDrag);
   slider.addEventListener("keydown", (event) => {
-    const current = Number(input.value) || 5;
+    const current = Number(input.value) || 0;
     if (event.key === "ArrowRight" || event.key === "ArrowUp") {
       event.preventDefault();
       paint(current + 1);
@@ -644,8 +645,8 @@ function bindStarSlider(slider) {
     }
   });
   const form = slider.closest("form");
-  if (form) form.addEventListener("reset", () => setTimeout(() => paint(input.value || 5), 0));
-  paint(input.value || 5);
+  if (form) form.addEventListener("reset", () => setTimeout(() => paint(""), 0));
+  paint("");
 }
 
 function productCard(p) {
@@ -1080,7 +1081,7 @@ function initProduct() {
     <div class="product-layout">
       ${galleryHTML(p)}
       <div class="buybox">
-        <div class="meta" id="product-meta">★ ${p.rating} · 후기 ${p.reviews} · ${groupName(g)} · ${p.mode === "rent" ? "대여상품" : "구매상품"}</div>
+        <div class="meta" id="product-meta">${groupName(g)} · ${p.mode === "rent" ? "대여상품" : "구매상품"}</div>
         <h1>${p.name}</h1>
         <p>${p.desc}</p>
         <div class="price-box">${priceBox}</div>
@@ -1099,7 +1100,7 @@ function initProduct() {
     </div>
     <nav class="product-tabs" id="product-tabs">
       <button type="button" class="product-tab is-active" data-product-tab="detail">상세정보</button>
-      <button type="button" class="product-tab" data-product-tab="review" id="tab-review-btn">상품후기 (${p.reviews || 0})</button>
+      <button type="button" class="product-tab" data-product-tab="review" id="tab-review-btn">상품후기 (0)</button>
       <button type="button" class="product-tab" data-product-tab="qna" id="tab-qna-btn">상품문의 (0)</button>
       <button type="button" class="product-tab" data-product-tab="shipping">배송/교환/환불</button>
     </nav>
@@ -1109,7 +1110,7 @@ function initProduct() {
       <table class="spec-table">${specRows || "<tr><th>상품명</th><td>" + esc(p.name) + "</td></tr>"}</table>
     </section>
     <section class="product-pane" data-product-pane="review" hidden>
-      <div class="review-summary" id="review-summary">★ ${p.rating} / 5.0 · 후기 ${p.reviews || 0}건</div>
+      <div class="review-summary" id="review-summary">아직 등록된 후기가 없습니다.</div>
       <p><button class="btn btn-teal" type="button" id="review-write-btn">구매 후기 작성</button></p>
       <div id="review-list"><p class="muted">후기를 불러오는 중…</p></div>
     </section>
@@ -1142,16 +1143,20 @@ function initProduct() {
         <h2>구매 후기 작성</h2>
         <form class="form" id="review-form">
           <label>별점</label>
-          <div class="star-slider" data-star-slider role="slider" tabindex="0" aria-label="별점" aria-valuemin="1" aria-valuemax="5" aria-valuenow="5">
+          <div class="star-slider" data-star-slider role="slider" tabindex="0" aria-label="별점" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0">
             <span data-star="1">★</span>
             <span data-star="2">★</span>
             <span data-star="3">★</span>
             <span data-star="4">★</span>
             <span data-star="5">★</span>
           </div>
-          <input type="hidden" name="rating" value="5" />
+          <input type="hidden" name="rating" value="" />
           <label>구매 옵션</label>
-          <input name="option_text" placeholder="예: 대여 / 본품" />
+          <select name="option_text" required>
+            <option value="">선택</option>
+            <option value="대여">대여</option>
+            <option value="본품">본품</option>
+          </select>
           <label>후기 내용</label>
           <textarea name="content" rows="4" required></textarea>
           <p class="form-error" id="review-error" hidden></p>
@@ -1172,13 +1177,22 @@ function initProduct() {
   async function loadReviews() {
     const data = await api("/api/products/" + encodeURIComponent(p.id) + "/reviews");
     const count = data.count || 0;
-    const avg = data.average || p.rating || 0;
+    const avg = Number(data.average) || 0;
     const reviewBtn = box.querySelector("#tab-review-btn");
     if (reviewBtn) reviewBtn.textContent = "상품후기 (" + count + ")";
     const summary = box.querySelector("#review-summary");
-    if (summary) summary.innerHTML = `<span class="star-row">${starIcons(avg)}</span> <b>${avg.toFixed ? avg.toFixed(1) : avg}</b> / 5.0 · 총 ${count}건`;
+    if (summary) {
+      summary.innerHTML = count
+        ? `<span class="star-row">${starIcons(avg)}</span> <b>${avg.toFixed(1)}</b> / 5.0 · 총 ${count}건`
+        : "아직 등록된 후기가 없습니다.";
+    }
     const meta = box.querySelector("#product-meta");
-    if (meta) meta.textContent = `★ ${avg} · 후기 ${count} · ${groupName(g)} · ${p.mode === "rent" ? "대여상품" : "구매상품"}`;
+    if (meta) {
+      const bits = [];
+      if (count) bits.push("★ " + avg.toFixed(1), "후기 " + count);
+      bits.push(groupName(g), p.mode === "rent" ? "대여상품" : "구매상품");
+      meta.textContent = bits.join(" · ");
+    }
     const list = box.querySelector("#review-list");
     if (!data.reviews || !data.reviews.length) {
       list.innerHTML = `<p class="muted">아직 등록된 후기가 없습니다.</p>`;
@@ -1296,6 +1310,15 @@ function initProduct() {
     reviewForm.onsubmit = async (e) => {
       e.preventDefault();
       showFormError("#review-error", "");
+      const rating = Number(reviewForm.rating.value);
+      if (!(rating >= 1 && rating <= 5)) {
+        showFormError("#review-error", "별점을 선택해 주세요.");
+        return;
+      }
+      if (!reviewForm.option_text.value) {
+        showFormError("#review-error", "구매 옵션을 선택해 주세요.");
+        return;
+      }
       try {
         await api("/api/products/" + encodeURIComponent(p.id) + "/reviews", {
           method: "POST",

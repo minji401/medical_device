@@ -62,8 +62,6 @@ const WELFARE_PRODUCTS = [
     price: 79400,
     period: "월",
     badges: ["rent", "hot"],
-    rating: 4.9,
-    reviews: 218,
     desc: "등판·다리·높낮이를 각각 조절할 수 있는 가정용 전동침대입니다. 낙상 방지 사이드레일과 방문 설치가 포함됩니다.",
     specs: { "최저 높이": "29cm", "최대 높이": "68cm", "최대하중": "180kg", "설치": "영천·경산·대구 방문" }
   },
@@ -75,8 +73,6 @@ const WELFARE_PRODUCTS = [
     price: 35000,
     period: "월",
     badges: ["rent", "ship"],
-    rating: 4.8,
-    reviews: 164,
     desc: "보호자 이동과 외출이 편한 초경량 휠체어입니다. 접이식 구조로 차량 수납이 쉽습니다.",
     specs: { "중량": "12.8kg", "시트폭": "46cm", "접이식": "가능", "브레이크": "양측 장착" }
   },
@@ -87,8 +83,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 198000,
     badges: ["hot", "ship"],
-    rating: 4.9,
-    reviews: 302,
     desc: "장보기와 산책에 적합한 유모차형 보행기입니다. 접이식 좌석과 쇼핑백이 포함됩니다.",
     specs: { "무게": "7.4kg", "높이조절": "5단", "하중": "100kg", "브레이크": "후륜 핸드브레이크" }
   },
@@ -99,8 +93,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 34500,
     badges: ["ship"],
-    rating: 4.7,
-    reviews: 97,
     desc: "실내 보행 연습과 화장실 이동을 돕는 가벼운 워커입니다.",
     specs: { "재질": "알루미늄", "접이식": "가능", "바퀴": "선택형", "높이": "조절형" }
   },
@@ -111,8 +103,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 52800,
     badges: ["ship"],
-    rating: 4.8,
-    reviews: 141,
     desc: "네 발이 바닥을 넓게 잡아 균형이 불안한 어르신께 권하는 지팡이입니다.",
     specs: { "재질": "알루미늄", "손잡이": "T자형", "높이": "10단 조절", "무게": "680g" }
   },
@@ -123,8 +113,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 18000,
     badges: ["ship"],
-    rating: 4.6,
-    reviews: 88,
     desc: "변기·샤워부스 옆 벽에 설치하는 기본형 손잡이입니다. 4개 이상 구매 시 방문 설치를 지원합니다.",
     specs: { "길이": "40cm", "재질": "스테인리스", "하중": "120kg", "설치": "4개 이상 무료" }
   },
@@ -135,8 +123,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 45000,
     badges: ["hot"],
-    rating: 4.7,
-    reviews: 76,
     desc: "미끄럼 방지 발판과 등받이가 있는 욕실 의자입니다.",
     specs: { "재질": "알루미늄+PE", "높이": "조절형", "등받이": "있음", "방수": "가능" }
   },
@@ -147,8 +133,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 89000,
     badges: ["hot"],
-    rating: 4.8,
-    reviews: 119,
     desc: "장시간 좌식 생활 시 압박을 분산하는 방석입니다. 휠체어에도 사용할 수 있습니다.",
     specs: { "소재": "우레탄 폼", "커버": "방수 분리형", "무게": "1.1kg", "세탁": "커버 세탁" }
   },
@@ -159,8 +143,6 @@ const WELFARE_PRODUCTS = [
     mode: "both",
     price: 126000,
     badges: ["rent"],
-    rating: 4.9,
-    reviews: 85,
     desc: "와상 어르신의 피부 압력을 주기적으로 분산합니다. 구입 또는 대여가 가능합니다.",
     specs: { "방식": "교대부양", "소음": "저소음 모터", "크기": "싱글", "펌프": "포함" }
   },
@@ -171,8 +153,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 78000,
     badges: ["ship"],
-    rating: 4.6,
-    reviews: 64,
     desc: "야간 화장실 이동이 부담스러울 때 침실에 두는 이동변기입니다.",
     specs: { "버킷": "분리형", "팔걸이": "있음", "높이": "조절형", "하중": "110kg" }
   },
@@ -183,8 +163,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 22000,
     badges: ["ship"],
-    rating: 4.5,
-    reviews: 203,
     desc: "샤워실 바닥에 까는 논슬립 매트입니다. 흡착 돌기로 밀림을 줄입니다.",
     specs: { "크기": "60×90cm", "소재": "PVC", "배수홀": "있음", "색상": "블루" }
   },
@@ -195,8 +173,6 @@ const WELFARE_PRODUCTS = [
     mode: "both",
     price: 158000,
     badges: ["rent"],
-    rating: 4.7,
-    reviews: 41,
     desc: "문턱과 단차를 낮춰 휠체어·워커 이동을 돕습니다.",
     specs: { "길이": "90cm", "하중": "270kg", "접이식": "가능", "재질": "알루미늄" }
   },
@@ -207,8 +183,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 18900,
     badges: ["ship"],
-    rating: 4.4,
-    reviews: 256,
     desc: "하루 활동용 흡수 팬티입니다. 속옷처럼 착용할 수 있습니다.",
     specs: { "흡수량": "중형", "매수": "20매", "사이즈": "M~L", "성별": "공용" }
   },
@@ -219,8 +193,6 @@ const WELFARE_PRODUCTS = [
     mode: "buy",
     price: 98000,
     badges: ["hot"],
-    rating: 4.8,
-    reviews: 52,
     desc: "벽 타공 없이 바닥과 천장 사이에 세우는 기둥형 손잡이입니다.",
     specs: { "설치": "무타공", "높이": "210~280cm", "하중": "100kg", "위치": "변기·침대 옆" }
   },
@@ -232,8 +204,6 @@ const WELFARE_PRODUCTS = [
     price: 69800,
     period: "월",
     badges: ["rent"],
-    rating: 4.8,
-    reviews: 73,
     desc: "체격이 크거나 보호자 도움이 잦은 가정에 맞춘 와이드 전동침대입니다.",
     specs: { "매트리스": "90×195cm", "모터": "2모터", "난간": "양쪽", "최대하중": "200kg" }
   },
@@ -245,8 +215,6 @@ const WELFARE_PRODUCTS = [
     price: 49000,
     period: "월",
     badges: ["rent"],
-    rating: 4.7,
-    reviews: 38,
     desc: "장시간 앉아 계실 때 자세를 바꿀 수 있는 거상형 휠체어입니다.",
     specs: { "등받이": "리클라이닝", "발판": "분리형", "시트": "넓은형", "이동": "보호자형" }
   }
@@ -272,8 +240,6 @@ function productFrom(partial) {
   if (partial.group === "disability" && !badges.includes("aid")) badges.push("aid");
   return Object.assign({
     mode: "buy",
-    rating: Math.round((4.4 + (h % 6) / 10) * 10) / 10,
-    reviews: 8 + (h % 320)
   }, partial, { badges });
 }
 
